@@ -1,0 +1,184 @@
+{
+  "entities": {
+    "Store": {
+      "title": "Store",
+      "description": "Store locations",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "location": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "createdAt"]
+    },
+    "Product": {
+      "title": "Product",
+      "description": "Inventory items",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "name": { "type": "string" },
+        "category": { "type": "string" },
+        "unit": { "type": "string" },
+        "stockQuantity": { "type": "number" },
+        "buyingPrice": { "type": "number" },
+        "sellingPrice": { "type": "number" }
+      },
+      "required": ["storeId", "name", "stockQuantity", "buyingPrice", "sellingPrice"]
+    },
+    "Sale": {
+      "title": "Sale",
+      "description": "Sales transactions",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "sellingPrice": { "type": "number" },
+        "buyingPrice": { "type": "number" },
+        "discount": { "type": "number" },
+        "paymentMethod": { "type": "string" }
+      },
+      "required": ["storeId", "date", "productId", "quantity", "sellingPrice", "buyingPrice", "paymentMethod"]
+    },
+    "Expense": {
+      "title": "Expense",
+      "description": "Operational expenses",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "description": { "type": "string" },
+        "category": { "type": "string" },
+        "amount": { "type": "number" }
+      },
+      "required": ["storeId", "date", "description", "category", "amount"]
+    },
+    "Restock": {
+      "title": "Restock",
+      "description": "Inventory restock events",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" },
+        "unitCost": { "type": "number" }
+      },
+      "required": ["storeId", "date", "productId", "quantity", "unitCost"]
+    },
+    "Client": {
+      "title": "Client",
+      "description": "Customer information and debt tracking",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "name": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "totalDebt": { "type": "number" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["storeId", "name", "phone", "totalDebt", "createdAt"]
+    },
+    "ClientTransaction": {
+      "title": "ClientTransaction",
+      "description": "Ledger entries for clients",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "type": { "type": "string", "enum": ["CREDIT", "PAYMENT"] },
+        "amount": { "type": "number" },
+        "description": { "type": "string" },
+        "productId": { "type": "string" },
+        "quantity": { "type": "number" }
+      },
+      "required": ["storeId", "clientId", "date", "type", "amount", "description"]
+    },
+    "AlertRule": {
+      "title": "AlertRule",
+      "description": "Rules for triggering alerts",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "name": { "type": "string" },
+        "type": { "type": "string" },
+        "targetId": { "type": "string" },
+        "threshold": { "type": "number" },
+        "isActive": { "type": "boolean" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["storeId", "name", "type", "threshold", "isActive", "createdAt"]
+    },
+    "TriggeredAlert": {
+      "title": "TriggeredAlert",
+      "description": "Alerts that have been fired",
+      "type": "object",
+      "properties": {
+        "storeId": { "type": "string" },
+        "ruleId": { "type": "string" },
+        "message": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "isRead": { "type": "boolean" }
+      },
+      "required": ["storeId", "ruleId", "message", "timestamp", "isRead"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User account information and roles",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "role": { "type": "string", "enum": ["executive", "employee"] },
+        "displayName": { "type": "string" },
+        "assignedStoreIds": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["email", "role"]
+    }
+  },
+  "firestore": {
+    "/stores/{storeId}": {
+      "schema": "Store",
+      "description": "Stores collection"
+    },
+    "/products/{productId}": {
+      "schema": "Product",
+      "description": "Inventory collection"
+    },
+    "/sales/{saleId}": {
+      "schema": "Sale",
+      "description": "Sales records"
+    },
+    "/expenses/{expenseId}": {
+      "schema": "Expense",
+      "description": "Expense records"
+    },
+    "/restocks/{restockId}": {
+      "schema": "Restock",
+      "description": "Restock records"
+    },
+    "/clients/{clientId}": {
+      "schema": "Client",
+      "description": "Client records"
+    },
+    "/clientTransactions/{transactionId}": {
+      "schema": "ClientTransaction",
+      "description": "Client ledger transactions"
+    },
+    "/alertRules/{ruleId}": {
+      "schema": "AlertRule",
+      "description": "Alert configuration"
+    },
+    "/triggeredAlerts/{alertId}": {
+      "schema": "TriggeredAlert",
+      "description": "Fired alerts"
+    },
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User profiles and roles"
+    }
+  }
+}

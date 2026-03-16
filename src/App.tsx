@@ -10,6 +10,7 @@ import {
   ChevronDown,
   Plus, 
   Trash2, 
+  Edit2,
   Edit3, 
   TrendingUp, 
   DollarSign,
@@ -32,8 +33,12 @@ import {
   CheckCircle,
   Activity,
   Users,
-  CreditCard
+  CreditCard,
+  FileText,
+  Download
 } from 'lucide-react';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
   BarChart, 
@@ -62,13 +67,145 @@ import {
   isSameMonth, 
   isSameDay, 
   addMonths,
-  isToday
+  isToday,
+  isValid
 } from 'date-fns';
-import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction } from './types';
-import { cn, formatCurrency, calculateMarkup, calculateMargin } from './lib/utils';
+import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile } from './types';
+import { cn, formatCurrency, calculateMarkup, calculateMargin, round, EAST_AFRICAN_CURRENCIES } from './lib/utils';
+import { auth, db } from './firebase';
+import { 
+  onAuthStateChanged, 
+  signInWithPopup, 
+  GoogleAuthProvider, 
+  signOut
+} from 'firebase/auth';
+import type { User } from 'firebase/auth';
+import { 
+  collection, 
+  onSnapshot, 
+  doc, 
+  setDoc, 
+  updateDoc, 
+  deleteDoc, 
+  query, 
+  where, 
+  getDoc,
+  getDocs,
+  getDocFromServer,
+  writeBatch,
+  Timestamp
+} from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients';
+type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  error: Error | null;
+}
+
+class ErrorBoundary extends React.Component<{ children: React.ReactNode }, ErrorBoundaryState> {
+  state: ErrorBoundaryState = { hasError: false, error: null };
+
+  constructor(props: { children: React.ReactNode }) {
+    super(props);
+  }
+
+  static getDerivedStateFromError(error: Error): ErrorBoundaryState {
+    return { hasError: true, error };
+  }
+
+  componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    console.error("ErrorBoundary caught an error", error, errorInfo);
+  }
+
+  render() {
+    if (this.state.hasError) {
+      let errorMessage = "An unexpected error occurred.";
+      try {
+        const errorData = JSON.parse(this.state.error?.message || "");
+        if (errorData.error) {
+          errorMessage = `System Error: ${errorData.error}`;
+        }
+      } catch (e) {
+        errorMessage = this.state.error?.message || errorMessage;
+      }
+
+      return (
+        <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-lethal-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
+            <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto text-rose-500">
+              <AlertTriangle size={32} />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold text-white">System Failure</h2>
+              <p className="text-zinc-500 text-sm leading-relaxed">{errorMessage}</p>
+            </div>
+            <button 
+              onClick={() => window.location.reload()}
+              className="w-full bg-lethal-orange text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+            >
+              REBOOT SYSTEM
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (this as any).props.children;
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 const StatCard = ({ 
   label, 
@@ -87,30 +224,38 @@ const StatCard = ({
   const isGood = inverse ? !isPositive : isPositive;
   
   return (
-    <div className="bg-lethal-gray p-6 rounded-3xl border border-zinc-800">
-      <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">{label}</p>
-      <div className="flex justify-between items-end">
+    <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+      <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
+      <div className="mt-2">
         <p className={cn(
-          "text-2xl font-bold",
+          "text-3xl sm:text-4xl font-bold tracking-tight",
           highlight === "emerald" ? "text-emerald-500" : highlight === "rose" ? "text-rose-500" : "text-white"
         )}>{value}</p>
-        <div className={cn(
-          "flex items-center gap-0.5 lethal-mono text-[8px] font-bold mb-1",
-          isGood ? "text-emerald-500" : "text-rose-500"
-        )}>
-          {isPositive ? <ArrowUpRight size={10} /> : <ArrowDownRight size={10} />}
-          {Math.abs(trend).toFixed(0)}%
-        </div>
+      </div>
+      <div className={cn(
+        "absolute bottom-5 right-6 flex items-center gap-1 lethal-mono text-[10px] font-bold",
+        isGood ? "text-emerald-500" : "text-rose-500"
+      )}>
+        {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
+        {Math.abs(trend).toFixed(0)}%
       </div>
     </div>
   );
 };
 
 export default function App() {
+  const [user, setUser] = useState<User | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
+  const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('weekly');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
-  const [userRole, setUserRole] = useState<UserRole>('executive');
+  const [userRole, setUserRole] = useState<UserRole>('employee');
+  const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [currencyCode, setCurrencyCode] = useState('USD');
+  const f = (amount: number) => formatCurrency(amount, currencyCode);
+  const [stores, setStores] = useState<Store[]>([]);
+  const [selectedStoreId, setSelectedStoreId] = useState<string | 'ALL'>('ALL');
   const [products, setProducts] = useState<Product[]>([]);
   const [sales, setSales] = useState<Sale[]>([]);
   const [expenses, setExpenses] = useState<Expense[]>([]);
@@ -119,32 +264,30 @@ export default function App() {
   const [clientTransactions, setClientTransactions] = useState<ClientTransaction[]>([]);
   const [alerts, setAlerts] = useState<AlertRule[]>([]);
   const [triggeredAlerts, setTriggeredAlerts] = useState<TriggeredAlert[]>([]);
-  
-  // Calendar States
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [selectedDate, setSelectedDate] = useState<Date | null>(new Date());
+  const [confirmModal, setConfirmModal] = useState<{
+    isOpen: boolean;
+    title: string;
+    message: string;
+    onConfirm: () => void;
+  }>({
+    isOpen: false,
+    title: '',
+    message: '',
+    onConfirm: () => {}
+  });
 
-  const getDayStats = (date: Date) => {
-    const dateStr = format(date, 'yyyy-MM-dd');
-    const daySales = sales.filter(s => s.date === dateStr);
-    const dayExpenses = expenses.filter(e => e.date === dateStr);
-    const dayRestocks = restocks.filter(r => r.date === dateStr);
-    
-    const revenue = daySales.reduce((acc, s) => acc + (s.quantity * s.sellingPrice - s.discount), 0);
-    const totalExpenses = dayExpenses.reduce((acc, e) => acc + e.amount, 0);
-    const restockCost = dayRestocks.reduce((acc, r) => acc + (r.quantity * r.unitCost), 0);
-    
-    const cogs = daySales.reduce((acc, s) => {
-      const product = products.find(p => p.id === s.productId);
-      return acc + (s.quantity * (product?.buyingPrice || 0));
-    }, 0);
-    
-    const netProfit = revenue - cogs - totalExpenses;
-    
-    return { revenue, totalExpenses, netProfit, salesCount: daySales.length, restockCost };
-  };
+  const [authModal, setAuthModal] = useState<{
+    isOpen: boolean;
+    targetRole: UserRole | null;
+    password: '';
+    error: string;
+  }>({
+    isOpen: false,
+    targetRole: null,
+    password: '',
+    error: ''
+  });
 
-  // Modals
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
   const [isSaleModalOpen, setIsSaleModalOpen] = useState(false);
   const [isExpenseModalOpen, setIsExpenseModalOpen] = useState(false);
@@ -152,72 +295,199 @@ export default function App() {
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
   const [isClientTransactionModalOpen, setIsClientTransactionModalOpen] = useState(false);
+  const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
+  const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
+  
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
-  const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
-
-  // Search States
-  const [salesSearch, setSalesSearch] = useState('');
-  const [expensesSearch, setExpensesSearch] = useState('');
+  const [editingClient, setEditingClient] = useState<Client | null>(null);
+  const [editingStaff, setEditingStaff] = useState<UserProfile | null>(null);
+  const [editingStore, setEditingStore] = useState<Store | null>(null);
+  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [selectedProductId, setSelectedProductId] = useState<string>('');
+  
+  const [productForm, setProductForm] = useState<Partial<Product>>({ name: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined });
+  const [saleForm, setSaleForm] = useState<Partial<Sale>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
+  const [expenseForm, setExpenseForm] = useState<Partial<Expense>>({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
+  const [restockForm, setRestockForm] = useState<Partial<Restock>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
+  const [clientForm, setClientForm] = useState<Partial<Client>>({ name: '', phone: '', email: '', totalDebt: undefined });
+  const [clientTransactionForm, setClientTransactionForm] = useState<Partial<ClientTransaction>>({ date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined });
+  const [alertForm, setAlertForm] = useState<Partial<AlertRule>>({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
+  const [staffForm, setStaffForm] = useState<{ email: string; role: UserRole; displayName: string; assignedStoreIds: string[] }>({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
+  const [storeForm, setStoreForm] = useState<Partial<Store>>({ name: '', location: '' });
+  
+  const [reportDate, setReportDate] = useState(format(new Date(), 'yyyy-MM-dd'));
+  const [selectedDate, setSelectedDate] = useState(new Date());
+  const [currentMonth, setCurrentMonth] = useState(new Date());
+  const [modalSearch, setModalSearch] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [productsSearch, setProductsSearch] = useState('');
   const [clientsSearch, setClientsSearch] = useState('');
-  const [modalSearch, setModalSearch] = useState('');
+  const [staffSearch, setStaffSearch] = useState('');
 
-  // Form States
-  const [productForm, setProductForm] = useState<Partial<Product>>({
-    name: '', sku: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined
-  });
-  const [saleForm, setSaleForm] = useState<Partial<Sale>>({
-    date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash'
-  });
-  const [expenseForm, setExpenseForm] = useState<Partial<Expense>>({
-    date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined
-  });
-  const [restockForm, setRestockForm] = useState<Partial<Restock>>({
-    date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined
-  });
-  const [alertForm, setAlertForm] = useState<Partial<AlertRule>>({
-    name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true
-  });
-  const [clientForm, setClientForm] = useState<Partial<Client>>({
-    name: '', phone: '', email: '', totalDebt: undefined
-  });
-  const [clientTransactionForm, setClientTransactionForm] = useState<Partial<ClientTransaction>>({
-    date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined
-  });
-  const [selectedClient, setSelectedClient] = useState<Client | null>(null);
+  const [staff, setStaff] = useState<{ id: string; email: string; role: UserRole; displayName?: string }[]>([]);
 
-  // Load initial data
-  useEffect(() => {
-    const savedProducts = localStorage.getItem('aura_products');
-    const savedSales = localStorage.getItem('aura_sales');
-    const savedExpenses = localStorage.getItem('aura_expenses');
-    const savedAlerts = localStorage.getItem('aura_alerts');
-    const savedTriggered = localStorage.getItem('aura_triggered');
-    const savedRestocks = localStorage.getItem('aura_restocks');
-    const savedClients = localStorage.getItem('aura_clients');
-    const savedClientTransactions = localStorage.getItem('aura_client_transactions');
+  const getDayStats = (date: Date) => {
+    const dateStr = format(date, 'yyyy-MM-dd');
+    const daySales = sales.filter(s => s.date === dateStr);
+    const dayExpenses = expenses.filter(e => e.date === dateStr);
+    const dayRestocks = restocks.filter(r => r.date === dateStr);
     
-    if (savedProducts) setProducts(JSON.parse(savedProducts));
-    if (savedSales) setSales(JSON.parse(savedSales));
-    if (savedExpenses) setExpenses(JSON.parse(savedExpenses));
-    if (savedAlerts) setAlerts(JSON.parse(savedAlerts));
-    if (savedTriggered) setTriggeredAlerts(JSON.parse(savedTriggered));
-    if (savedRestocks) setRestocks(JSON.parse(savedRestocks));
-    if (savedClients) setClients(JSON.parse(savedClients));
-    if (savedClientTransactions) setClientTransactions(JSON.parse(savedClientTransactions));
+    const revenue = round(daySales.reduce((acc, s) => acc + (s.quantity * s.sellingPrice - s.discount), 0));
+    const expenseTotal = round(dayExpenses.reduce((acc, e) => acc + e.amount, 0));
+    const restockCost = round(dayRestocks.reduce((acc, r) => acc + (r.quantity * r.unitCost), 0));
+    
+    // Use COGS (Cost of Goods Sold) for accurate profit calculation
+    const cogs = round(daySales.reduce((acc, sale) => {
+      const buyingPrice = sale.buyingPrice ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0;
+      return acc + (sale.quantity * buyingPrice);
+    }, 0));
+    
+    const netProfit = round(revenue - expenseTotal - cogs);
+    
+    return { revenue, expenseTotal, restockCost, netProfit };
+  };
+  
+  // Auth and User Profile Sync
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setUser(currentUser);
+      if (currentUser) {
+        // Sync user profile/role
+        const userDocRef = doc(db, 'users', currentUser.uid);
+        const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
+        
+        try {
+          const userDoc = await getDoc(userDocRef);
+          if (userDoc.exists()) {
+            const data = userDoc.data() as UserProfile;
+            setUserProfile({ ...data, id: userDoc.id });
+            setUserRole(data.role);
+          } else {
+            // Check if there's a pre-authorized role by email
+            const emailDoc = await getDoc(emailDocRef);
+            let role: UserRole = currentUser.email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
+            let displayName = currentUser.displayName || '';
+            let assignedStoreIds: string[] = [];
+
+            if (emailDoc.exists()) {
+              const data = emailDoc.data() as UserProfile;
+              role = data.role;
+              displayName = data.displayName || displayName;
+              assignedStoreIds = data.assignedStoreIds || [];
+              // Delete the temporary email-based doc
+              await deleteDoc(emailDocRef);
+            }
+
+            // Create the permanent UID-based doc
+            const newProfile: UserProfile = {
+              id: currentUser.uid,
+              email: currentUser.email || '',
+              role: role,
+              displayName: displayName,
+              assignedStoreIds: assignedStoreIds
+            };
+            await setDoc(userDocRef, newProfile);
+            setUserProfile(newProfile);
+            setUserRole(role);
+          }
+        } catch (error) {
+          handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
+        }
+      }
+      setIsAuthReady(true);
+    });
+    return () => unsubscribe();
   }, []);
 
-  // Save to localStorage
+  // Firestore Real-time Sync
   useEffect(() => {
-    localStorage.setItem('aura_products', JSON.stringify(products));
-    localStorage.setItem('aura_sales', JSON.stringify(sales));
-    localStorage.setItem('aura_expenses', JSON.stringify(expenses));
-    localStorage.setItem('aura_alerts', JSON.stringify(alerts));
-    localStorage.setItem('aura_triggered', JSON.stringify(triggeredAlerts));
-    localStorage.setItem('aura_restocks', JSON.stringify(restocks));
-    localStorage.setItem('aura_clients', JSON.stringify(clients));
-    localStorage.setItem('aura_client_transactions', JSON.stringify(clientTransactions));
-  }, [products, sales, expenses, alerts, triggeredAlerts, restocks, clients, clientTransactions]);
+    if (!isAuthReady || !user) return;
+
+    const unsubStores = onSnapshot(collection(db, 'stores'), (snapshot) => {
+      const storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
+      setStores(storesData);
+      
+      // If the selected store was deleted, or if no store is selected and we have stores
+      if (selectedStoreId !== 'ALL') {
+        if (!storesData.find(s => s.id === selectedStoreId)) {
+          setSelectedStoreId('ALL');
+        }
+      } else if (userRole !== 'executive' && storesData.length > 0) {
+        setSelectedStoreId(storesData[0].id);
+      }
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'stores'));
+
+    const getQuery = (colName: string) => {
+      let baseQuery = collection(db, colName);
+      if (selectedStoreId !== 'ALL') {
+        return query(baseQuery, where('storeId', '==', selectedStoreId));
+      }
+      return query(baseQuery);
+    };
+
+    const unsubProducts = onSnapshot(getQuery('products'), (snapshot) => {
+      setProducts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Product)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'products'));
+
+    const unsubSales = onSnapshot(getQuery('sales'), (snapshot) => {
+      setSales(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Sale)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'sales'));
+
+    const unsubExpenses = onSnapshot(getQuery('expenses'), (snapshot) => {
+      setExpenses(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Expense)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'expenses'));
+
+    const unsubRestocks = onSnapshot(getQuery('restocks'), (snapshot) => {
+      setRestocks(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Restock)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'restocks'));
+
+    const unsubClients = onSnapshot(getQuery('clients'), (snapshot) => {
+      setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'clients'));
+
+    const unsubTransactions = onSnapshot(getQuery('clientTransactions'), (snapshot) => {
+      setClientTransactions(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as ClientTransaction)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'clientTransactions'));
+
+    const unsubAlerts = onSnapshot(getQuery('alertRules'), (snapshot) => {
+      setAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as AlertRule)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'alertRules'));
+
+    const unsubTriggered = onSnapshot(getQuery('triggeredAlerts'), (snapshot) => {
+      setTriggeredAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TriggeredAlert)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'triggeredAlerts'));
+
+    const unsubStaff = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+
+    return () => {
+      unsubStores();
+      unsubProducts();
+      unsubSales();
+      unsubExpenses();
+      unsubRestocks();
+      unsubClients();
+      unsubTransactions();
+      unsubAlerts();
+      unsubTriggered();
+      unsubStaff();
+    };
+  }, [isAuthReady, user, selectedStoreId, userRole]);
+
+  // Test Connection
+  useEffect(() => {
+    async function testConnection() {
+      try {
+        await getDocFromServer(doc(db, 'test', 'connection'));
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
+        }
+      }
+    }
+    testConnection();
+  }, []);
 
   // Calculations
   const stats = useMemo(() => {
@@ -233,15 +503,15 @@ export default function App() {
         return d >= startDate && d <= endDate;
       });
 
-      const revenue = periodSales.reduce((acc, sale) => acc + (sale.quantity * sale.sellingPrice - sale.discount), 0);
-      const cogs = periodSales.reduce((acc, sale) => {
-        const product = products.find(p => p.id === sale.productId);
-        return acc + (sale.quantity * (product?.buyingPrice || 0));
-      }, 0);
-      const grossProfit = revenue - cogs;
-      const totalExpenses = periodExpenses.reduce((acc, exp) => acc + exp.amount, 0);
-      const netProfit = grossProfit - totalExpenses;
-      const margin = revenue > 0 ? (netProfit / revenue) * 100 : 0;
+      const revenue = round(periodSales.reduce((acc, sale) => acc + (sale.quantity * sale.sellingPrice - sale.discount), 0));
+      const cogs = round(periodSales.reduce((acc, sale) => {
+        const buyingPrice = sale.buyingPrice ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0;
+        return acc + (sale.quantity * buyingPrice);
+      }, 0));
+      const grossProfit = round(revenue - cogs);
+      const totalExpenses = round(periodExpenses.reduce((acc, exp) => acc + exp.amount, 0));
+      const netProfit = round(grossProfit - totalExpenses);
+      const margin = revenue > 0 ? round((netProfit / revenue) * 100) : 0;
 
       return { revenue, grossProfit, totalExpenses, netProfit, margin };
     };
@@ -314,6 +584,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
+              storeId: alert.storeId,
               ruleId: alert.id,
               message: `CRITICAL: ${product.name} stock reached ${product.stockQuantity} (Threshold: ${alert.threshold})`,
               timestamp: nowIso,
@@ -328,8 +599,9 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
+              storeId: alert.storeId,
               ruleId: alert.id,
-              message: `OBJECTIVE REACHED: Sales target of ${formatCurrency(alert.threshold)} achieved! Current: ${formatCurrency(totalSales)}`,
+              message: `OBJECTIVE REACHED: Sales target of ${f(alert.threshold)} achieved! Current: ${f(totalSales)}`,
               timestamp: nowIso,
               isRead: false
             });
@@ -341,6 +613,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
+              storeId: alert.storeId,
               ruleId: alert.id,
               message: `MARGIN ALERT: Current profit margin (${stats.current.margin.toFixed(1)}%) is below threshold (${alert.threshold}%)`,
               timestamp: nowIso,
@@ -362,6 +635,7 @@ export default function App() {
             if (!alreadyTriggered) {
               newTriggered.push({
                 id: Math.random().toString(36).substr(2, 9),
+                storeId: alert.storeId,
                 ruleId: alert.id,
                 message: `VELOCITY ALERT: ${product.name} is selling fast! ${productSalesLast24h} units sold in last 24h.`,
                 timestamp: nowIso,
@@ -400,157 +674,666 @@ export default function App() {
   }, [sales, expenses, paymentMethodFilter]);
 
   // Handlers
-  const handleAddProduct = () => {
-    if (editingProduct) {
-      setProducts(products.map(p => p.id === editingProduct.id ? { 
-        ...productForm, 
+  const handleAddProduct = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      if (!productForm.name) {
+        throw new Error("Product Name is required.");
+      }
+
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      // Remove id from payload to prevent Firestore update errors
+      const { id, ...data } = productForm;
+      const payload = {
+        ...data,
+        storeId,
         stockQuantity: productForm.stockQuantity || 0,
         buyingPrice: productForm.buyingPrice || 0,
-        sellingPrice: productForm.sellingPrice || 0,
-        id: p.id 
-      } as Product : p));
-      setEditingProduct(null);
-    } else {
-      const newProduct: Product = { 
-        ...productForm as Product, 
-        stockQuantity: productForm.stockQuantity || 0,
-        buyingPrice: productForm.buyingPrice || 0,
-        sellingPrice: productForm.sellingPrice || 0,
-        id: Math.random().toString(36).substr(2, 9) 
+        sellingPrice: productForm.sellingPrice || 0
       };
-      setProducts([...products, newProduct]);
+
+      if (editingProduct) {
+        const docRef = doc(db, 'products', editingProduct.id);
+        await updateDoc(docRef, payload);
+        setEditingProduct(null);
+      } else {
+        const colRef = collection(db, 'products');
+        const newDocRef = doc(colRef);
+        await setDoc(newDocRef, payload);
+      }
+      setProductForm({ name: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined });
+      setIsProductModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, editingProduct ? OperationType.UPDATE : OperationType.CREATE, 'products');
+    } finally {
+      setIsSubmitting(false);
     }
-    setProductForm({ name: '', sku: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined });
-    setIsProductModalOpen(false);
   };
 
-  const handleAddSale = () => {
+  const handleAddSale = async () => {
+    if (isSubmitting) return;
     const product = products.find(p => p.id === saleForm.productId);
     if (!product) return;
-    const newSale: Sale = { 
-      ...saleForm as Sale, 
-      id: Math.random().toString(36).substr(2, 9), 
-      quantity: saleForm.quantity || 0,
-      discount: saleForm.discount || 0,
-      sellingPrice: product.sellingPrice,
-      paymentMethod: saleForm.paymentMethod || 'Cash'
-    };
-    setProducts(products.map(p => p.id === product.id ? { ...p, stockQuantity: p.stockQuantity - (saleForm.quantity || 0) } : p));
-    setSales([...sales, newSale]);
-    setSaleForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
-    setIsSaleModalOpen(false);
+    setIsSubmitting(true);
+    try {
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      const saleColRef = collection(db, 'sales');
+      const newSaleDocRef = doc(saleColRef);
+      const saleData = { 
+        ...saleForm, 
+        storeId,
+        quantity: saleForm.quantity || 0,
+        discount: saleForm.discount || 0,
+        sellingPrice: product.sellingPrice,
+        buyingPrice: product.buyingPrice,
+        paymentMethod: saleForm.paymentMethod || 'Cash'
+      };
+      
+      await setDoc(newSaleDocRef, saleData);
+      
+      // Update stock
+      const productDocRef = doc(db, 'products', product.id);
+      await updateDoc(productDocRef, { 
+        stockQuantity: product.stockQuantity - (saleForm.quantity || 0) 
+      });
+
+      setSaleForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
+      setIsSaleModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'sales');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleAddExpense = () => {
-    const newExpense: Expense = { 
-      ...expenseForm as Expense, 
-      amount: expenseForm.amount || 0,
-      id: Math.random().toString(36).substr(2, 9) 
-    };
-    setExpenses([...expenses, newExpense]);
-    setExpenseForm({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
-    setIsExpenseModalOpen(false);
+  const handleAddExpense = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      const colRef = collection(db, 'expenses');
+      const newDocRef = doc(colRef);
+      await setDoc(newDocRef, { 
+        ...expenseForm, 
+        storeId,
+        amount: expenseForm.amount || 0
+      });
+      setExpenseForm({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
+      setIsExpenseModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'expenses');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
-  const handleAddRestock = () => {
+  const handleAddRestock = async () => {
+    if (isSubmitting) return;
     const product = products.find(p => p.id === restockForm.productId);
     if (!product) return;
-    const newRestock: Restock = { 
-      ...restockForm as Restock, 
-      id: Math.random().toString(36).substr(2, 9),
-      quantity: restockForm.quantity || 0,
-      unitCost: restockForm.unitCost || product.buyingPrice 
-    };
-    setProducts(products.map(p => p.id === product.id ? { ...p, stockQuantity: p.stockQuantity + (restockForm.quantity || 0) } : p));
-    setRestocks([...restocks, newRestock]);
-    setRestockForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
-    setIsRestockModalOpen(false);
-  };
+    setIsSubmitting(true);
+    try {
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
 
-  const handleAddAlert = () => {
-    const newAlert: AlertRule = { 
-      ...alertForm as AlertRule, 
-      threshold: alertForm.threshold || 0,
-      id: Math.random().toString(36).substr(2, 9),
-      createdAt: new Date().toISOString()
-    };
-    setAlerts([...alerts, newAlert]);
-    setAlertForm({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
-    setIsAlertModalOpen(false);
-  };
+      const colRef = collection(db, 'restocks');
+      const newDocRef = doc(colRef);
+      await setDoc(newDocRef, { 
+        ...restockForm, 
+        storeId,
+        quantity: restockForm.quantity || 0,
+        unitCost: restockForm.unitCost || product.buyingPrice 
+      });
+      
+      const productDocRef = doc(db, 'products', product.id);
+      await updateDoc(productDocRef, { 
+        stockQuantity: product.stockQuantity + (restockForm.quantity || 0) 
+      });
 
-  const handleAddClient = () => {
-    const newClient: Client = {
-      ...clientForm as Client,
-      id: Math.random().toString(36).substr(2, 9),
-      totalDebt: clientForm.totalDebt || 0,
-      createdAt: new Date().toISOString()
-    };
-    setClients([...clients, newClient]);
-    setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
-    setIsClientModalOpen(false);
-  };
-
-  const handleAddClientTransaction = () => {
-    if (!selectedClient) return;
-    const newTransaction: ClientTransaction = {
-      ...clientTransactionForm as ClientTransaction,
-      amount: clientTransactionForm.amount || 0,
-      id: Math.random().toString(36).substr(2, 9),
-      clientId: selectedClient.id
-    };
-    
-    setClientTransactions([...clientTransactions, newTransaction]);
-    
-    // Update client debt
-    const debtChange = newTransaction.type === 'CREDIT' ? newTransaction.amount : -newTransaction.amount;
-    setClients(clients.map(c => 
-      c.id === selectedClient.id 
-        ? { ...c, totalDebt: c.totalDebt + debtChange }
-        : c
-    ));
-
-    // Update product stock if linked
-    if (newTransaction.type === 'CREDIT' && newTransaction.productId && newTransaction.quantity) {
-      setProducts(products.map(p => 
-        p.id === newTransaction.productId 
-          ? { ...p, stockQuantity: p.stockQuantity - (newTransaction.quantity || 0) }
-          : p
-      ));
+      setRestockForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
+      setIsRestockModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'restocks');
+    } finally {
+      setIsSubmitting(false);
     }
-    
-    setClientTransactionForm({
-      date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined
-    });
-    setIsClientTransactionModalOpen(false);
   };
+
+  const handleAddAlert = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      const colRef = collection(db, 'alertRules');
+      const newDocRef = doc(colRef);
+      await setDoc(newDocRef, { 
+        ...alertForm, 
+        storeId,
+        threshold: alertForm.threshold || 0,
+        createdAt: new Date().toISOString()
+      });
+      setAlertForm({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
+      setIsAlertModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'alertRules');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddClient = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      if (editingClient) {
+        const docRef = doc(db, 'clients', editingClient.id);
+        await updateDoc(docRef, { 
+          ...clientForm, 
+          storeId,
+          totalDebt: clientForm.totalDebt || 0 
+        });
+        setEditingClient(null);
+      } else {
+        const colRef = collection(db, 'clients');
+        const newDocRef = doc(colRef);
+        await setDoc(newDocRef, {
+          ...clientForm,
+          storeId,
+          totalDebt: clientForm.totalDebt || 0,
+          createdAt: new Date().toISOString()
+        });
+      }
+      setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
+      setIsClientModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, editingClient ? OperationType.UPDATE : OperationType.CREATE, 'clients');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteClient = async (clientId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'DELETE CLIENT',
+      message: 'Are you sure you want to delete this client? This will also remove all their ledger entries.',
+      onConfirm: async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        try {
+          await deleteDoc(doc(db, 'clients', clientId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `clients/${clientId}`);
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+    });
+  };
+
+  const handleAddClientTransaction = async () => {
+    if (isSubmitting) return;
+    if (!selectedClient) return;
+    setIsSubmitting(true);
+    try {
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      const colRef = collection(db, 'clientTransactions');
+      const newDocRef = doc(colRef);
+      const transactionData = {
+        ...clientTransactionForm,
+        storeId,
+        amount: clientTransactionForm.amount || 0,
+        clientId: selectedClient.id
+      };
+      
+      await setDoc(newDocRef, transactionData);
+      
+      // Update client debt
+      const debtChange = clientTransactionForm.type === 'CREDIT' ? (clientTransactionForm.amount || 0) : -(clientTransactionForm.amount || 0);
+      const clientDocRef = doc(db, 'clients', selectedClient.id);
+      await updateDoc(clientDocRef, { 
+        totalDebt: selectedClient.totalDebt + debtChange 
+      });
+
+      // Update product stock if linked
+      if (clientTransactionForm.type === 'CREDIT' && clientTransactionForm.productId && clientTransactionForm.quantity) {
+        const product = products.find(p => p.id === clientTransactionForm.productId);
+        if (product) {
+          const productDocRef = doc(db, 'products', product.id);
+          await updateDoc(productDocRef, { 
+            stockQuantity: product.stockQuantity - (clientTransactionForm.quantity || 0) 
+          });
+        }
+      }
+      
+      setClientTransactionForm({
+        date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined
+      });
+      setIsClientTransactionModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'clientTransactions');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddStaff = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      if (editingStaff) {
+        const docRef = doc(db, 'users', editingStaff.id);
+        await updateDoc(docRef, staffForm);
+        setEditingStaff(null);
+      } else {
+        // Use email as ID for pre-authorized staff so they can be found on first login
+        const docRef = doc(db, 'users', staffForm.email.toLowerCase());
+        await setDoc(docRef, staffForm);
+      }
+      setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
+      setIsStaffModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, editingStaff ? OperationType.UPDATE : OperationType.CREATE, 'users');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddStore = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      if (editingStore) {
+        const docRef = doc(db, 'stores', editingStore.id);
+        await updateDoc(docRef, storeForm);
+        setEditingStore(null);
+      } else {
+        const colRef = collection(db, 'stores');
+        const newDocRef = doc(colRef);
+        await setDoc(newDocRef, { ...storeForm, createdAt: new Date().toISOString() });
+      }
+      setStoreForm({ name: '', location: '' });
+      setIsStoreModalOpen(false);
+    } catch (err) {
+      handleFirestoreError(err, editingStore ? OperationType.UPDATE : OperationType.CREATE, 'stores');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleDeleteStore = async (storeId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'DELETE STORE',
+      message: 'Are you sure you want to delete this store? This will PERMANENTLY delete all products, sales, expenses, and other data associated with it.',
+      onConfirm: async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        try {
+          const batch = writeBatch(db);
+          
+          // Delete store
+          batch.delete(doc(db, 'stores', storeId));
+          
+          // Delete associated data
+          products.filter(p => p.storeId === storeId).forEach(p => batch.delete(doc(db, 'products', p.id)));
+          sales.filter(s => s.storeId === storeId).forEach(s => batch.delete(doc(db, 'sales', s.id)));
+          expenses.filter(e => e.storeId === storeId).forEach(e => batch.delete(doc(db, 'expenses', e.id)));
+          restocks.filter(r => r.storeId === storeId).forEach(r => batch.delete(doc(db, 'restocks', r.id)));
+          clients.filter(c => c.storeId === storeId).forEach(c => batch.delete(doc(db, 'clients', c.id)));
+          alerts.filter(a => a.storeId === storeId).forEach(a => batch.delete(doc(db, 'alertRules', a.id)));
+          triggeredAlerts.filter(t => t.storeId === storeId).forEach(t => batch.delete(doc(db, 'triggeredAlerts', t.id)));
+
+          await batch.commit();
+          
+          // Clean up assignedStoreIds in staff profiles
+          const staffToUpdate = staff.filter(s => (s as any).assignedStoreIds?.includes(storeId));
+          for (const s of staffToUpdate) {
+            const userDocRef = doc(db, 'users', s.id);
+            await updateDoc(userDocRef, {
+              assignedStoreIds: (s as any).assignedStoreIds.filter((id: string) => id !== storeId)
+            });
+          }
+
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `stores/${storeId}`);
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+    });
+  };
+
+  const handleDeleteStaff = async (staffId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'REMOVE STAFF',
+      message: 'Are you sure you want to remove this staff member? They will lose all access.',
+      onConfirm: async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        try {
+          await deleteDoc(doc(db, 'users', staffId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `users/${staffId}`);
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+    });
+  };
+
+  const handleDeleteProduct = async (productId: string) => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'DELETE PRODUCT',
+      message: 'Are you sure you want to delete this product? This will remove it from the inventory permanently.',
+      onConfirm: async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        try {
+          await deleteDoc(doc(db, 'products', productId));
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, `products/${productId}`);
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+    });
+  };
+
+  const handleDeleteAlert = async (alertId: string) => {
+    try {
+      await deleteDoc(doc(db, 'alertRules', alertId));
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `alertRules/${alertId}`);
+    }
+  };
+
+  const handleToggleAlert = async (alert: AlertRule) => {
+    try {
+      const docRef = doc(db, 'alertRules', alert.id);
+      await updateDoc(docRef, { isActive: !alert.isActive });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `alertRules/${alert.id}`);
+    }
+  };
+
+  const exportToPDF = () => {
+    const doc = new jsPDF();
+    const dateStr = format(parseISO(reportDate), 'MMMM dd, yyyy');
+    
+    // Header
+    doc.setFontSize(22);
+    doc.setTextColor(242, 125, 38); // Lethal Orange
+    doc.text('LETHAL FINANCE', 105, 20, { align: 'center' });
+    
+    doc.setFontSize(14);
+    doc.setTextColor(100);
+    doc.text(`DAILY OPERATIONAL REPORT: ${dateStr}`, 105, 30, { align: 'center' });
+    
+    // Stats Summary
+    const daySales = sales.filter(s => s.date === reportDate);
+    const dayExpenses = expenses.filter(e => e.date === reportDate);
+    const dayRestocks = restocks.filter(r => r.date === reportDate);
+    
+    const revenue = round(daySales.reduce((acc, s) => acc + (s.quantity * s.sellingPrice - s.discount), 0));
+    const totalExpenses = round(dayExpenses.reduce((acc, e) => acc + e.amount, 0));
+    const restockCost = round(dayRestocks.reduce((acc, r) => acc + (r.quantity * r.unitCost), 0));
+    
+    const cogs = round(daySales.reduce((acc, sale) => {
+      const buyingPrice = sale.buyingPrice ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0;
+      return acc + (sale.quantity * buyingPrice);
+    }, 0));
+    
+    const netProfit = round(revenue - totalExpenses - cogs);
+
+    const statsBody = [
+      ['Total Revenue', f(revenue)],
+      ['Operational Expenses', f(totalExpenses)],
+      ['Restock Investment', f(restockCost)],
+    ];
+
+    if (userRole === 'executive') {
+      statsBody.push(['Net Daily Profit', f(netProfit)]);
+    }
+
+    autoTable(doc, {
+      startY: 40,
+      head: [['Metric', 'Value']],
+      body: statsBody,
+      theme: 'striped',
+      headStyles: { fillColor: [242, 125, 38] }
+    });
+
+    // Sales Table
+    if (daySales.length > 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text('SALES LOG', 14, (doc as any).lastAutoTable.finalY + 10);
+      
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 15,
+        head: [['Product', 'Qty', 'Price', 'Discount', 'Total']],
+        body: daySales.map(s => {
+          const product = products.find(p => p.id === s.productId);
+          return [
+            product?.name || 'Unknown',
+            s.quantity,
+            f(s.sellingPrice),
+            f(s.discount),
+            f(s.quantity * s.sellingPrice - s.discount)
+          ];
+        }),
+      });
+    }
+
+    // Expenses Table
+    if (dayExpenses.length > 0) {
+      doc.setFontSize(12);
+      doc.setTextColor(0);
+      doc.text('EXPENSE LOG', 14, (doc as any).lastAutoTable.finalY + 10);
+      
+      autoTable(doc, {
+        startY: (doc as any).lastAutoTable.finalY + 15,
+        head: [['Description', 'Category', 'Amount']],
+        body: dayExpenses.map(e => [
+          e.description,
+          e.category,
+          f(e.amount)
+        ]),
+      });
+    }
+
+    doc.save(`Lethal_Report_${reportDate}.pdf`);
+  };
+
+  const handleLogin = async () => {
+    if (isLoggingIn) return;
+    setIsLoggingIn(true);
+    try {
+      const provider = new GoogleAuthProvider();
+      await signInWithPopup(auth, provider);
+    } catch (error: any) {
+      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
+        console.error("Login failed:", error);
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleRoleSwitch = async (targetRole: UserRole) => {
+    if (userRole === targetRole) return;
+    
+    if (targetRole === 'executive') {
+      setAuthModal({
+        isOpen: true,
+        targetRole: 'executive',
+        password: '',
+        error: ''
+      });
+    } else {
+      try {
+        if (user) {
+          await updateDoc(doc(db, 'users', user.uid), { role: 'employee' });
+          setUserRole('employee');
+        }
+      } catch (error) {
+        console.error("Failed to switch role:", error);
+      }
+    }
+  };
+
+  const handleAuthSubmit = async () => {
+    if (isSubmitting) return;
+    const executivePassword = (import.meta as any).env.VITE_EXECUTIVE_PASSWORD || 'admin123'; // Fallback for demo
+    
+    if (authModal.password === executivePassword) {
+      setIsSubmitting(true);
+      try {
+        if (user) {
+          await updateDoc(doc(db, 'users', user.uid), { role: 'executive' });
+          setUserRole('executive');
+          setAuthModal(prev => ({ ...prev, isOpen: false }));
+        }
+      } catch (error) {
+        setAuthModal(prev => ({ ...prev, error: 'FAILED TO UPDATE ROLE' }));
+      } finally {
+        setIsSubmitting(false);
+      }
+    } else {
+      setAuthModal(prev => ({ ...prev, error: 'INVALID PASSWORD' }));
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      setActiveTab('portfolio');
+    } catch (error) {
+      console.error("Logout failed:", error);
+    }
+  };
+
+  if (!isAuthReady) {
+    return (
+      <div className="min-h-screen bg-lethal-black flex items-center justify-center">
+        <div className="text-center space-y-4">
+          <div className="w-16 h-16 border-4 border-lethal-orange border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="lethal-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Intelligence Systems...</p>
+        </div>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
+        <div className="max-w-md w-full space-y-12 text-center">
+          <div className="space-y-4">
+            <h1 className="text-6xl sm:text-8xl lethal-title font-bold text-white">Lethal<br />Finance</h1>
+            <p className="lethal-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">Secure Operational Intelligence</p>
+          </div>
+          
+          <div className="bg-lethal-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
+            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-lethal-orange">
+              <Shield size={32} />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold text-white">Access Restricted</h2>
+              <p className="text-zinc-500 text-sm">Please authenticate to access the operational dashboard.</p>
+            </div>
+            <button 
+              onClick={handleLogin}
+              className="w-full bg-lethal-orange text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all flex items-center justify-center gap-3"
+            >
+              <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
+              SIGN IN WITH GOOGLE
+            </button>
+          </div>
+          
+          <p className="text-[10px] lethal-mono text-zinc-700 uppercase tracking-widest">
+            Authorized Personnel Only • Encrypted Session
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-lethal-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
       {/* Header */}
       <header className="mb-12">
         <div className="flex justify-between items-start mb-4">
-          <h1 className="text-6xl lethal-title font-bold">Lethal<br />Finance</h1>
-          <div className="flex gap-4">
-            <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
-              <button 
-                onClick={() => setUserRole('executive')}
-                className={cn(
-                  "px-3 py-1 rounded-full text-[8px] lethal-mono transition-all",
-                  userRole === 'executive' ? "bg-lethal-orange text-black font-bold" : "text-zinc-500 hover:text-zinc-300"
-                )}
+          <h1 className="text-4xl sm:text-6xl lethal-title font-bold">Lethal<br />Finance</h1>
+          <div className="flex gap-4 items-start">
+            <div className="flex flex-col gap-2">
+              {stores.length > 0 && (
+                <div className="relative">
+                  <select 
+                    value={selectedStoreId}
+                    onChange={(e) => setSelectedStoreId(e.target.value)}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-[8px] lethal-mono text-zinc-300 focus:outline-none focus:border-lethal-orange transition-all appearance-none cursor-pointer pr-8"
+                  >
+                    {userRole === 'executive' && <option value="ALL">ALL STORES</option>}
+                    {stores
+                      .filter(s => userRole === 'executive' || userProfile?.assignedStoreIds?.includes(s.id))
+                      .map(s => (
+                        <option key={s.id} value={s.id}>{s.name.toUpperCase()}</option>
+                      ))
+                    }
+                  </select>
+                  <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" size={10} />
+                </div>
+              )}
+              <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
+                <button 
+                  onClick={() => handleRoleSwitch('employee')}
+                  className={cn(
+                    "px-3 py-1 rounded-full text-[8px] lethal-mono transition-all",
+                    userRole === 'employee' ? "bg-zinc-700 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  EMPLOYEE
+                </button>
+                <button 
+                  onClick={() => handleRoleSwitch('executive')}
+                  className={cn(
+                    "px-3 py-1 rounded-full text-[8px] lethal-mono transition-all",
+                    userRole === 'executive' ? "bg-lethal-orange text-black font-bold" : "text-zinc-500 hover:text-zinc-300"
+                  )}
+                >
+                  EXECUTIVE
+                </button>
+              </div>
+              <select 
+                value={currencyCode}
+                onChange={(e) => setCurrencyCode(e.target.value)}
+                className="bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 text-[8px] lethal-mono text-zinc-300 focus:outline-none focus:border-lethal-orange transition-all appearance-none cursor-pointer text-center"
               >
-                EXEC
-              </button>
-              <button 
-                onClick={() => setUserRole('employee')}
-                className={cn(
-                  "px-3 py-1 rounded-full text-[8px] lethal-mono transition-all",
-                  userRole === 'employee' ? "bg-zinc-700 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
-                )}
-              >
-                STAFF
-              </button>
+                {EAST_AFRICAN_CURRENCIES.map(c => (
+                  <option key={c.code} value={c.code}>{c.code} - {c.name}</option>
+                ))}
+              </select>
             </div>
             <div className="relative">
               <button 
@@ -566,7 +1349,10 @@ export default function App() {
                 <span className="absolute top-0 right-0 w-3 h-3 bg-lethal-orange rounded-full border-2 border-lethal-black" />
               )}
             </div>
-            <button className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-lethal-orange hover:border-lethal-orange transition-all">
+            <button 
+              onClick={handleLogout}
+              className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-lethal-orange hover:border-lethal-orange transition-all"
+            >
               <LogOut size={24} />
             </button>
           </div>
@@ -574,19 +1360,22 @@ export default function App() {
       </header>
 
       {/* Navigation */}
-      <nav className="bg-lethal-gray rounded-2xl p-1 flex mb-12 border border-zinc-800/50">
+      <nav className="bg-lethal-gray rounded-2xl p-1.5 flex mb-12 border border-zinc-800/50 gap-2 overflow-x-auto no-scrollbar items-center">
         {[
           { id: 'portfolio', label: 'PORTFOLIO' },
           { id: 'store', label: 'STORE' },
           { id: 'clients', label: 'CLIENTS' },
           { id: 'calendar', label: 'CALENDAR' },
+          { id: 'reports', label: 'REPORTS' },
           { id: 'alerts', label: 'ALERTS' },
-        ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'clients')).map((tab) => (
+          { id: 'staff', label: 'STAFF' },
+          { id: 'stores', label: 'STORES' },
+        ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores')).map((tab) => (
           <button
             key={tab.id}
             onClick={() => setActiveTab(tab.id as Tab)}
             className={cn(
-              "flex-1 py-3 rounded-xl text-xs font-bold lethal-mono transition-all duration-300",
+              "flex-shrink-0 py-2 rounded-xl text-[9px] sm:text-[10px] font-bold lethal-mono transition-all duration-300 whitespace-nowrap px-3 sm:px-4",
               activeTab === tab.id 
                 ? "lethal-pill-active" 
                 : "text-zinc-500 hover:text-zinc-300"
@@ -629,15 +1418,15 @@ export default function App() {
             </div>
 
             {/* Quick Stats */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 gap-4">
               <StatCard 
                 label="Revenue" 
-                value={formatCurrency(stats.current.revenue)} 
+                value={f(stats.current.revenue)} 
                 trend={stats.trends.revenue}
               />
               <StatCard 
                 label="Expenses" 
-                value={formatCurrency(stats.current.totalExpenses)} 
+                value={f(stats.current.totalExpenses)} 
                 trend={stats.trends.expenses}
                 inverse
               />
@@ -645,25 +1434,25 @@ export default function App() {
                 <>
                   <StatCard 
                     label="Gross Profit" 
-                    value={formatCurrency(stats.current.grossProfit)} 
+                    value={f(stats.current.grossProfit)} 
                     trend={stats.trends.grossProfit}
                   />
                   <StatCard 
                     label="Net Profit" 
-                    value={formatCurrency(stats.current.netProfit)} 
+                    value={f(stats.current.netProfit)} 
                     trend={stats.trends.netProfit}
                     highlight={stats.current.netProfit >= 0 ? "emerald" : "rose"}
                   />
-                  <div className="col-span-2 bg-lethal-gray p-6 rounded-3xl border border-zinc-800 flex justify-between items-center">
-                    <div>
-                      <p className="lethal-mono text-[10px] text-zinc-500 mb-1 uppercase">Profit Margin</p>
-                      <p className="text-3xl font-bold text-white">{stats.current.margin.toFixed(1)}%</p>
+                  <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                    <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Profit Margin</p>
+                    <div className="mt-2">
+                      <p className="text-3xl sm:text-4xl font-bold tracking-tight text-white">{stats.current.margin.toFixed(1)}%</p>
                     </div>
                     <div className={cn(
-                      "flex items-center gap-1 lethal-mono text-[10px] font-bold px-3 py-1 rounded-full",
-                      stats.trends.margin >= 0 ? "text-emerald-500 bg-emerald-500/10" : "text-rose-500 bg-rose-500/10"
+                      "absolute bottom-5 right-6 flex items-center gap-1 lethal-mono text-[10px] font-bold",
+                      stats.trends.margin >= 0 ? "text-emerald-500" : "text-rose-500"
                     )}>
-                      {stats.trends.margin >= 0 ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+                      {stats.trends.margin >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
                       {Math.abs(stats.trends.margin).toFixed(1)}%
                     </div>
                   </div>
@@ -768,7 +1557,7 @@ export default function App() {
                               <>
                                 <span className="ml-2">• QTY: {item.quantity}</span>
                                 <span className="ml-2 text-lethal-orange/60">• {(item as Sale).paymentMethod?.toUpperCase()}</span>
-                                {item.discount > 0 && <span className="ml-2 text-rose-500/80">• DISC: {formatCurrency(item.discount)}</span>}
+                                {item.discount > 0 && <span className="ml-2 text-rose-500/80">• DISC: {f(item.discount)}</span>}
                               </>
                             )}
                             {isRestock && (
@@ -785,9 +1574,9 @@ export default function App() {
                         isRestock ? "text-emerald-500" : 
                         "text-zinc-500"
                       )}>
-                        {isSale ? formatCurrency(item.quantity * item.sellingPrice - item.discount) : 
+                        {isSale ? f(item.quantity * item.sellingPrice - item.discount) : 
                          isRestock ? `+${item.quantity}` : 
-                         formatCurrency((item as Expense).amount)}
+                         f((item as Expense).amount)}
                       </p>
                     </div>
                   );
@@ -841,7 +1630,7 @@ export default function App() {
 
                 <div className="space-y-4">
                   {products
-                    .filter(p => p.name.toLowerCase().includes(productsSearch.toLowerCase()) || p.sku.toLowerCase().includes(productsSearch.toLowerCase()))
+                    .filter(p => p.name.toLowerCase().includes(productsSearch.toLowerCase()))
                     .map(product => {
                       const productSales = sales.filter(s => s.productId === product.id);
                       const totalProfit = productSales.reduce((acc, sale) => {
@@ -858,9 +1647,9 @@ export default function App() {
                         >
                           <div>
                             <h4 className="font-bold text-white mb-1">{product.name}</h4>
-                            <p className="lethal-mono text-[10px] text-zinc-500">{product.sku} • {product.stockQuantity} {product.unit} REMAINING</p>
+                            <p className="lethal-mono text-[10px] text-zinc-500">{product.stockQuantity} {product.unit} REMAINING</p>
                             {userRole === 'executive' && (
-                              <p className="lethal-mono text-[9px] text-emerald-500 mt-2">TOTAL PROFIT: {formatCurrency(totalProfit)}</p>
+                              <p className="lethal-mono text-[9px] text-emerald-500 mt-2">TOTAL PROFIT: {f(totalProfit)}</p>
                             )}
                           </div>
                           <div className="text-right">
@@ -870,11 +1659,11 @@ export default function App() {
                                   {calculateMargin(product.buyingPrice, product.sellingPrice).toFixed(1)}%
                                 </span>
                               )}
-                              <p className="text-lethal-orange font-bold">{formatCurrency(product.sellingPrice)}</p>
+                              <p className="text-lethal-orange font-bold">{f(product.sellingPrice)}</p>
                             </div>
                             <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); }} className="text-zinc-500 hover:text-white"><Edit3 size={14} /></button>
-                              <button onClick={(e) => { e.stopPropagation(); setProducts(products.filter(p => p.id !== product.id)); }} className="text-zinc-500 hover:text-rose-500"><Trash2 size={14} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); handleDeleteProduct(product.id); }} className="text-zinc-500 hover:text-rose-500"><Trash2 size={14} /></button>
                             </div>
                           </div>
                         </div>
@@ -918,33 +1707,33 @@ export default function App() {
 
                   return (
                     <>
-                      <div className="flex justify-between items-end">
+                      <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
                         <div>
-                          <h2 className="text-4xl font-bold lethal-title mb-2">{product.name}</h2>
-                          <p className="lethal-mono text-xs text-zinc-500">{product.sku} • {product.category}</p>
+                          <h2 className="text-2xl sm:text-4xl font-bold lethal-title mb-2">{product.name}</h2>
+                          <p className="lethal-mono text-[10px] sm:text-xs text-zinc-500">{product.category}</p>
                         </div>
                         {userRole === 'executive' && (
-                          <div className="text-right">
+                          <div className="text-left sm:text-right">
                             <p className="lethal-mono text-[10px] text-zinc-500 mb-1 uppercase">Total Profit</p>
-                            <p className="text-3xl font-bold text-emerald-500">{formatCurrency(totalProfit)}</p>
+                            <p className="text-2xl sm:text-3xl font-bold text-emerald-500 break-all">{f(totalProfit)}</p>
                           </div>
                         )}
                       </div>
 
-                      <div className={cn("grid gap-4", userRole === 'executive' ? "grid-cols-3" : "grid-cols-2")}>
-                        <div className="bg-lethal-gray p-6 rounded-3xl border border-zinc-800">
+                      <div className={cn("grid gap-4", userRole === 'executive' ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2")}>
+                        <div className="bg-lethal-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
                           <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">Stock</p>
-                          <p className="text-xl font-bold text-white">{product.stockQuantity} {product.unit}</p>
+                          <p className="text-lg sm:text-xl font-bold text-white break-all">{product.stockQuantity} {product.unit}</p>
                         </div>
                         {userRole === 'executive' && (
-                          <div className="bg-lethal-gray p-6 rounded-3xl border border-zinc-800">
+                          <div className="bg-lethal-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
                             <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">Buying Price</p>
-                            <p className="text-xl font-bold text-white">{formatCurrency(product.buyingPrice)}</p>
+                            <p className="text-lg sm:text-xl font-bold text-white break-all">{f(product.buyingPrice)}</p>
                           </div>
                         )}
-                        <div className="bg-lethal-gray p-6 rounded-3xl border border-zinc-800">
+                        <div className="bg-lethal-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
                           <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">Selling Price</p>
-                          <p className="text-xl font-bold text-lethal-orange">{formatCurrency(product.sellingPrice)}</p>
+                          <p className="text-lg sm:text-xl font-bold text-lethal-orange break-all">{f(product.sellingPrice)}</p>
                         </div>
                       </div>
 
@@ -955,7 +1744,8 @@ export default function App() {
                             {productSales
                               .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
                               .map((sale) => {
-                                const profit = (sale.quantity * sale.sellingPrice) - sale.discount - (sale.quantity * product.buyingPrice);
+                                const buyingPrice = sale.buyingPrice ?? product.buyingPrice;
+                                const profit = round((sale.quantity * sale.sellingPrice) - sale.discount - (sale.quantity * buyingPrice));
                                 return (
                                   <div key={sale.id} className="bg-lethal-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
                                     <div>
@@ -963,9 +1753,9 @@ export default function App() {
                                       <p className="lethal-mono text-[9px] text-zinc-500">{format(parseISO(sale.date), 'MMM dd, yyyy')}</p>
                                     </div>
                                     <div className="text-right">
-                                      <p className="text-sm font-bold text-lethal-orange">{formatCurrency((sale.quantity * sale.sellingPrice) - sale.discount)}</p>
+                                      <p className="text-sm font-bold text-lethal-orange">{f((sale.quantity * sale.sellingPrice) - sale.discount)}</p>
                                       {userRole === 'executive' && (
-                                        <p className="lethal-mono text-[9px] text-emerald-500">PROFIT: {formatCurrency(profit)}</p>
+                                        <p className="lethal-mono text-[9px] text-emerald-500">PROFIT: {f(profit)}</p>
                                       )}
                                     </div>
                                   </div>
@@ -1065,7 +1855,7 @@ export default function App() {
                                 />
                               </div>
                               <p className="text-[7px] lethal-mono text-lethal-orange font-bold">
-                                {formatCurrency(stats.revenue)}
+                                {f(stats.revenue)}
                               </p>
                             </div>
                           )}
@@ -1103,7 +1893,7 @@ export default function App() {
                   <div className="flex gap-4">
                     <div className="text-right">
                       <p className="text-[8px] lethal-mono text-zinc-500 uppercase">Daily Revenue</p>
-                      <p className="text-sm font-bold text-white">{formatCurrency(getDayStats(selectedDate).revenue)}</p>
+                      <p className="text-sm font-bold text-white">{f(getDayStats(selectedDate).revenue)}</p>
                     </div>
                     {userRole === 'executive' && (
                       <div className="text-right">
@@ -1112,7 +1902,7 @@ export default function App() {
                           "text-sm font-bold",
                           getDayStats(selectedDate).netProfit >= 0 ? "text-emerald-500" : "text-rose-500"
                         )}>
-                          {formatCurrency(getDayStats(selectedDate).netProfit)}
+                          {f(getDayStats(selectedDate).netProfit)}
                         </p>
                       </div>
                     )}
@@ -1130,9 +1920,9 @@ export default function App() {
                             <div key={sale.id} className="flex justify-between items-center py-2 border-b border-zinc-800/50 last:border-0">
                               <div>
                                 <p className="text-xs font-bold text-white">{product?.name || 'Unknown'}</p>
-                                <p className="text-[8px] lethal-mono text-zinc-600">QTY: {sale.quantity} • {sale.paymentMethod?.toUpperCase()} • {formatCurrency(sale.sellingPrice)}/ea</p>
+                                <p className="text-[8px] lethal-mono text-zinc-600">QTY: {sale.quantity} • {sale.paymentMethod?.toUpperCase()} • {f(sale.sellingPrice)}/ea</p>
                               </div>
-                              <p className="text-xs font-bold text-lethal-orange">{formatCurrency(sale.quantity * sale.sellingPrice - sale.discount)}</p>
+                              <p className="text-xs font-bold text-lethal-orange">{f(sale.quantity * sale.sellingPrice - sale.discount)}</p>
                             </div>
                           );
                         })}
@@ -1152,7 +1942,7 @@ export default function App() {
                               <p className="text-xs font-bold text-white">{expense.description}</p>
                               <p className="text-[8px] lethal-mono text-zinc-600 uppercase">{expense.category}</p>
                             </div>
-                            <p className="text-xs font-bold text-zinc-400">{formatCurrency(expense.amount)}</p>
+                            <p className="text-xs font-bold text-zinc-400">{f(expense.amount)}</p>
                           </div>
                         ))}
                       </div>
@@ -1174,8 +1964,8 @@ export default function App() {
                                 <p className="text-[8px] lethal-mono text-emerald-500 uppercase">ADDED {restock.quantity} {product?.unit || 'units'}</p>
                               </div>
                               <div className="text-right">
-                                <p className="text-xs font-bold text-zinc-400">{formatCurrency(restock.quantity * restock.unitCost)}</p>
-                                <p className="text-[8px] lethal-mono text-zinc-600 uppercase">COST: {formatCurrency(restock.unitCost)}/ea</p>
+                                <p className="text-xs font-bold text-zinc-400">{f(restock.quantity * restock.unitCost)}</p>
+                                <p className="text-[8px] lethal-mono text-zinc-600 uppercase">COST: {f(restock.unitCost)}/ea</p>
                               </div>
                             </div>
                           );
@@ -1191,7 +1981,7 @@ export default function App() {
           </motion.div>
         )}
 
-        {activeTab === 'clients' && userRole === 'executive' && (
+        {activeTab === 'clients' && (
           <motion.div
             key="clients"
             initial={{ opacity: 0, y: 10 }}
@@ -1202,7 +1992,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold lethal-title">Client Ledger</h2>
               <button 
-                onClick={() => setIsClientModalOpen(true)}
+                onClick={() => {
+                  setEditingClient(null);
+                  setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
+                  setIsClientModalOpen(true);
+                }}
                 className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -1238,7 +2032,7 @@ export default function App() {
                       <div className="text-right">
                         <p className="lethal-mono text-[8px] text-zinc-500 uppercase mb-1">Outstanding Debt</p>
                         <p className={cn("text-xl font-bold", client.totalDebt > 0 ? "text-rose-500" : "text-emerald-500")}>
-                          {formatCurrency(client.totalDebt)}
+                          {f(client.totalDebt)}
                         </p>
                       </div>
                     </div>
@@ -1251,8 +2045,20 @@ export default function App() {
                         <CreditCard size={14} /> ADJUST BALANCE
                       </button>
                       <button 
-                        onClick={() => setClients(clients.filter(c => c.id !== client.id))}
+                        onClick={() => {
+                          setEditingClient(client);
+                          setClientForm({ name: client.name, phone: client.phone, email: client.email, totalDebt: client.totalDebt });
+                          setIsClientModalOpen(true);
+                        }}
+                        className="w-12 bg-zinc-800 hover:bg-lethal-orange/20 hover:text-lethal-orange text-zinc-500 rounded-xl flex items-center justify-center transition-all"
+                        title="Edit Client"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteClient(client.id)}
                         className="w-12 bg-zinc-800 hover:bg-rose-500/20 hover:text-rose-500 text-zinc-500 rounded-xl flex items-center justify-center transition-all"
+                        title="Delete Client"
                       >
                         <Trash2 size={16} />
                       </button>
@@ -1278,7 +2084,7 @@ export default function App() {
                                 </span>
                               </div>
                               <span className={t.type === 'CREDIT' ? "text-rose-500" : "text-emerald-500"}>
-                                {t.type === 'CREDIT' ? '+' : '-'}{formatCurrency(t.amount)}
+                                {t.type === 'CREDIT' ? '+' : '-'}{f(t.amount)}
                               </span>
                             </div>
                           ))}
@@ -1290,6 +2096,116 @@ export default function App() {
                   </div>
                 ))}
             </div>
+          </motion.div>
+        )}
+        {activeTab === 'reports' && (
+          <motion.div
+            key="reports"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold lethal-title">Intelligence Reports</h2>
+              <button 
+                onClick={exportToPDF}
+                className="flex items-center gap-2 bg-lethal-orange text-black px-6 py-3 rounded-full font-bold lethal-mono text-[10px] tracking-widest hover:scale-105 transition-transform"
+              >
+                <Download size={16} /> EXPORT PDF
+              </button>
+            </div>
+
+            <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
+              <label className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Select Report Date</label>
+              <input 
+                type="date" 
+                value={reportDate}
+                onChange={(e) => setReportDate(e.target.value)}
+                className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none lethal-mono"
+              />
+            </div>
+
+            {(() => {
+              const daySales = sales.filter(s => s.date === reportDate);
+              const dayExpenses = expenses.filter(e => e.date === reportDate);
+              const dayRestocks = restocks.filter(r => r.date === reportDate);
+              
+              const revenue = round(daySales.reduce((acc, s) => acc + (s.quantity * s.sellingPrice - s.discount), 0));
+              const totalExpenses = round(dayExpenses.reduce((acc, e) => acc + e.amount, 0));
+              const restockCost = round(dayRestocks.reduce((acc, r) => acc + (r.quantity * r.unitCost), 0));
+              
+              const cogs = round(daySales.reduce((acc, sale) => {
+                const buyingPrice = sale.buyingPrice ?? products.find(p => p.id === sale.productId)?.buyingPrice ?? 0;
+                return acc + (sale.quantity * buyingPrice);
+              }, 0));
+              
+              const netProfit = round(revenue - totalExpenses - cogs);
+
+              return (
+                <div className="space-y-8">
+                  <div className="grid grid-cols-1 gap-4">
+                    <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                      <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Revenue</p>
+                      <div className="mt-2">
+                        <p className="text-3xl sm:text-4xl font-bold tracking-tight text-white">{f(revenue)}</p>
+                      </div>
+                    </div>
+                    {userRole === 'executive' && (
+                      <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                        <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Profit</p>
+                        <div className="mt-2">
+                          <p className={cn("text-3xl sm:text-4xl font-bold tracking-tight", netProfit >= 0 ? "text-emerald-500" : "text-rose-500")}>
+                            {f(netProfit)}
+                          </p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="lethal-mono text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Sales Log ({daySales.length})</h3>
+                    {daySales.length > 0 ? (
+                      <div className="space-y-2">
+                        {daySales.map(s => {
+                          const product = products.find(p => p.id === s.productId);
+                          return (
+                            <div key={s.id} className="bg-lethal-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
+                              <div>
+                                <p className="text-sm font-bold text-white">{product?.name || 'Unknown'}</p>
+                                <p className="lethal-mono text-[9px] text-zinc-500">QTY: {s.quantity} • {s.paymentMethod}</p>
+                              </div>
+                              <p className="text-sm font-bold text-lethal-orange">{f(s.quantity * s.sellingPrice - s.discount)}</p>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-center py-8 text-[10px] lethal-mono text-zinc-700 italic border border-dashed border-zinc-800 rounded-3xl">NO SALES RECORDED FOR THIS DATE</p>
+                    )}
+                  </div>
+
+                  <div className="space-y-4">
+                    <h3 className="lethal-mono text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Expense Log ({dayExpenses.length})</h3>
+                    {dayExpenses.length > 0 ? (
+                      <div className="space-y-2">
+                        {dayExpenses.map(e => (
+                          <div key={e.id} className="bg-lethal-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
+                            <div>
+                              <p className="text-sm font-bold text-white">{e.description}</p>
+                              <p className="lethal-mono text-[9px] text-zinc-500">{e.category}</p>
+                            </div>
+                            <p className="text-sm font-bold text-rose-500">{f(e.amount)}</p>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-center py-8 text-[10px] lethal-mono text-zinc-700 italic border border-dashed border-zinc-800 rounded-3xl">NO EXPENSES RECORDED FOR THIS DATE</p>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
           </motion.div>
         )}
         {activeTab === 'alerts' && userRole === 'executive' && (
@@ -1380,13 +2296,13 @@ export default function App() {
                         <div>
                           <h4 className="font-bold text-white text-sm">{rule.name}</h4>
                           <p className="lethal-mono text-[9px] text-zinc-500">
-                            {rule.type.replace('_', ' ')} • THRESHOLD: {rule.type === 'SALES_TARGET' ? formatCurrency(rule.threshold) : rule.threshold}
+                            {rule.type.replace('_', ' ')} • THRESHOLD: {rule.type === 'SALES_TARGET' ? f(rule.threshold) : rule.threshold}
                           </p>
                         </div>
                       </div>
                       <div className="flex items-center gap-4">
                         <button 
-                          onClick={() => setAlerts(alerts.map(a => a.id === rule.id ? { ...a, isActive: !a.isActive } : a))}
+                          onClick={() => handleToggleAlert(rule)}
                           className={cn(
                             "w-10 h-5 rounded-full relative transition-all",
                             rule.isActive ? "bg-lethal-orange" : "bg-zinc-800"
@@ -1397,7 +2313,7 @@ export default function App() {
                             rule.isActive ? "right-1" : "left-1"
                           )} />
                         </button>
-                        <button onClick={() => setAlerts(alerts.filter(a => a.id !== rule.id))} className="text-zinc-700 hover:text-rose-500 transition-colors">
+                        <button onClick={() => handleDeleteAlert(rule.id)} className="text-zinc-700 hover:text-rose-500 transition-colors">
                           <Trash2 size={16} />
                         </button>
                       </div>
@@ -1405,6 +2321,173 @@ export default function App() {
                   ))}
                 </div>
               )}
+            </div>
+          </motion.div>
+        )}
+        {activeTab === 'staff' && userRole === 'executive' && (
+          <motion.div
+            key="staff"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold lethal-title">Staff Command</h2>
+              <button 
+                onClick={() => {
+                  setEditingStaff(null);
+                  setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
+                  setIsStaffModalOpen(true);
+                }}
+                className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+
+            <div className="relative">
+              <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={18} />
+              <input 
+                type="text" 
+                placeholder="SEARCH STAFF..." 
+                value={staffSearch}
+                onChange={e => setStaffSearch(e.target.value)}
+                className="w-full bg-lethal-gray border border-zinc-800 rounded-3xl pl-12 pr-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+              />
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {staff
+                .filter(s => s.email.toLowerCase().includes(staffSearch.toLowerCase()) || (s.displayName || '').toLowerCase().includes(staffSearch.toLowerCase()))
+                .map(member => (
+                  <div key={member.id} className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
+                        <Users size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white text-sm">{member.displayName || 'Unnamed Staff'}</h4>
+                        <p className="lethal-mono text-[9px] text-zinc-500 uppercase">{member.email}</p>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          <button 
+                            onClick={async () => {
+                              try {
+                                const newRole: UserRole = member.role === 'executive' ? 'employee' : 'executive';
+                                await updateDoc(doc(db, 'users', member.id), { role: newRole });
+                              } catch (err) {
+                                handleFirestoreError(err, OperationType.UPDATE, `users/${member.id}`);
+                              }
+                            }}
+                            className={cn(
+                              "px-2 py-0.5 rounded text-[8px] font-bold lethal-mono uppercase transition-all hover:scale-105",
+                              member.role === 'executive' ? "bg-lethal-orange/10 text-lethal-orange" : "bg-zinc-800 text-zinc-500"
+                            )}
+                          >
+                            {member.role === 'executive' ? 'EXEC' : 'STAFF'}
+                          </button>
+                          {member.assignedStoreIds?.map(storeId => {
+                            const store = stores.find(s => s.id === storeId);
+                            return store ? (
+                              <span key={storeId} className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[8px] font-bold lethal-mono uppercase">
+                                {store.name}
+                              </span>
+                            ) : null;
+                          })}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          setEditingStaff(member);
+                          setStaffForm({ 
+                            email: member.email, 
+                            role: member.role, 
+                            displayName: member.displayName || '',
+                            assignedStoreIds: member.assignedStoreIds || []
+                          });
+                          setIsStaffModalOpen(true);
+                        }}
+                        className="p-2 text-zinc-500 hover:text-lethal-orange transition-colors"
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button 
+                        onClick={() => handleDeleteStaff(member.id)}
+                        className="p-2 text-zinc-500 hover:text-rose-500 transition-colors"
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+            </div>
+          </motion.div>
+        )}
+        {activeTab === 'stores' && userRole === 'executive' && (
+          <motion.div
+            key="stores"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold lethal-title">Store Command</h2>
+              <button 
+                onClick={() => {
+                  setEditingStore(null);
+                  setStoreForm({ name: '', location: '' });
+                  setIsStoreModalOpen(true);
+                }}
+                className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+              >
+                <Plus size={20} />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {stores.map(store => (
+                <div key={store.id} className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
+                  <div className="flex items-center gap-4">
+                    <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
+                      <Package size={24} />
+                    </div>
+                    <div>
+                      <h4 className="font-bold text-white text-sm">{store.name}</h4>
+                      <p className="lethal-mono text-[9px] text-zinc-500 uppercase">{store.location || 'NO LOCATION SET'}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <button 
+                      onClick={() => {
+                        if (isSubmitting) return;
+                        setEditingStore(store);
+                        setStoreForm({ name: store.name, location: store.location || '' });
+                        setIsStoreModalOpen(true);
+                      }}
+                      disabled={isSubmitting}
+                      className={cn(
+                        "p-2 transition-colors",
+                        isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-lethal-orange"
+                      )}
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                    <button 
+                      onClick={() => !isSubmitting && handleDeleteStore(store.id)}
+                      disabled={isSubmitting}
+                      className={cn(
+                        "p-2 transition-colors",
+                        isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-rose-500"
+                      )}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           </motion.div>
         )}
@@ -1417,18 +2500,116 @@ export default function App() {
 
       {/* Modals (Simplified for token limit, but functional) */}
       <AnimatePresence>
-        {(isProductModalOpen || isSaleModalOpen || isExpenseModalOpen || isRestockModalOpen || isAlertModalOpen || isClientModalOpen || isClientTransactionModalOpen) && (
+        {(isProductModalOpen || isSaleModalOpen || isExpenseModalOpen || isRestockModalOpen || isAlertModalOpen || isClientModalOpen || isClientTransactionModalOpen || isStaffModalOpen || isStoreModalOpen) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setModalSearch(''); }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
-            <motion.div initial={{ scale: 0.95, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.95, opacity: 0 }} className="relative bg-lethal-gray border border-zinc-800 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl">
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setModalSearch(''); }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div 
+              initial={{ y: 30, opacity: 0, scale: 0.98 }} 
+              animate={{ y: 0, opacity: 1, scale: 1 }} 
+              exit={{ y: 30, opacity: 0, scale: 0.98 }} 
+              transition={{ type: "spring", damping: 25, stiffness: 350 }}
+              className="relative bg-lethal-gray border border-zinc-800 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl"
+            >
               <div className="flex justify-between items-center mb-8">
                 <h3 className="text-2xl font-bold lethal-title">
-                  {isProductModalOpen ? (editingProduct ? 'EDIT STOCK' : 'NEW STOCK') : isSaleModalOpen ? 'ADD SALE' : isExpenseModalOpen ? 'ADD EXPENSE' : isRestockModalOpen ? 'RESTOCK STOCK' : isAlertModalOpen ? 'NEW ALERT' : isClientModalOpen ? 'NEW CLIENT' : 'ADJUST DEBT'}
+                  {isProductModalOpen ? (editingProduct ? 'EDIT STOCK' : 'NEW STOCK') : isSaleModalOpen ? 'ADD SALE' : isExpenseModalOpen ? 'ADD EXPENSE' : isRestockModalOpen ? 'RESTOCK STOCK' : isAlertModalOpen ? 'NEW ALERT' : isClientModalOpen ? 'NEW CLIENT' : isStaffModalOpen ? (editingStaff ? 'EDIT STAFF' : 'NEW STAFF') : isStoreModalOpen ? (editingStore ? 'EDIT STORE' : 'NEW STORE') : 'ADJUST DEBT'}
                 </h3>
-                <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
+                <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
               </div>
               
-              <div className="space-y-6">
+              <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                {isStoreModalOpen && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STORE NAME</label>
+                      <input type="text" placeholder="NAME" value={storeForm.name} onChange={e => setStoreForm({ ...storeForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">LOCATION</label>
+                      <input type="text" placeholder="LOCATION" value={storeForm.location} onChange={e => setStoreForm({ ...storeForm, location: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                    </div>
+                    <button 
+                      onClick={handleAddStore} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : (editingStore ? 'Update Store' : 'Initialize Store')}
+                    </button>
+                  </>
+                )}
+                {isStaffModalOpen && (
+                  <>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">DISPLAY NAME</label>
+                      <input type="text" placeholder="NAME" value={staffForm.displayName} onChange={e => setStaffForm({ ...staffForm, displayName: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">EMAIL ADDRESS</label>
+                      <input type="email" placeholder="EMAIL" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" disabled={!!editingStaff} />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">USER ROLE</label>
+                      <div className="flex bg-lethal-black p-1 rounded-2xl border border-zinc-800">
+                        <button 
+                          onClick={() => setStaffForm({ ...staffForm, role: 'employee' })}
+                          className={cn(
+                            "flex-1 py-3 rounded-xl text-[10px] font-bold lethal-mono transition-all",
+                            staffForm.role === 'employee' ? "bg-zinc-700 text-white" : "text-zinc-500"
+                          )}
+                        >
+                          STAFF
+                        </button>
+                        <button 
+                          onClick={() => setStaffForm({ ...staffForm, role: 'executive' })}
+                          className={cn(
+                            "flex-1 py-3 rounded-xl text-[10px] font-bold lethal-mono transition-all",
+                            staffForm.role === 'executive' ? "bg-lethal-orange text-black" : "text-zinc-500"
+                          )}
+                        >
+                          EXECUTIVE
+                        </button>
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">ASSIGNED STORES</label>
+                      <div className="grid grid-cols-2 gap-2">
+                        {stores.map(store => (
+                          <button
+                            key={store.id}
+                            onClick={() => {
+                              const current = staffForm.assignedStoreIds || [];
+                              const next = current.includes(store.id) 
+                                ? current.filter(id => id !== store.id)
+                                : [...current, store.id];
+                              setStaffForm({ ...staffForm, assignedStoreIds: next });
+                            }}
+                            className={cn(
+                              "px-4 py-3 rounded-xl text-[8px] font-bold lethal-mono transition-all border",
+                              staffForm.assignedStoreIds?.includes(store.id) 
+                                ? "bg-lethal-orange/10 border-lethal-orange text-lethal-orange" 
+                                : "bg-lethal-black border-zinc-800 text-zinc-500"
+                            )}
+                          >
+                            {store.name.toUpperCase()}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <button 
+                      onClick={handleAddStaff} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : (editingStaff ? 'Update Profile' : 'Authorize Staff')}
+                    </button>
+                  </>
+                )}
                 {isAlertModalOpen && (
                   <>
                     <div className="space-y-2">
@@ -1474,12 +2655,24 @@ export default function App() {
                         className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
                       />
                     </div>
-                    <button onClick={handleAddAlert} className="w-full lethal-pill-active py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest">INITIALIZE SURVEILLANCE</button>
+                    <button 
+                      onClick={handleAddAlert} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : 'INITIALIZE SURVEILLANCE'}
+                    </button>
                   </>
                 )}
 
                 {isClientModalOpen && (
                   <>
+                    <h2 className="text-xl font-bold lethal-title mb-6 uppercase tracking-widest">
+                      {editingClient ? 'Edit Client Profile' : 'Register New Client'}
+                    </h2>
                     <div className="space-y-2">
                       <label className="text-[10px] lethal-mono text-zinc-500 ml-2">CLIENT NAME</label>
                       <input type="text" placeholder="FULL NAME" value={clientForm.name} onChange={e => setClientForm({ ...clientForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
@@ -1492,7 +2685,16 @@ export default function App() {
                       <label className="text-[10px] lethal-mono text-zinc-500 ml-2">EMAIL (OPTIONAL)</label>
                       <input type="email" placeholder="EMAIL" value={clientForm.email} onChange={e => setClientForm({ ...clientForm, email: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
                     </div>
-                    <button onClick={handleAddClient} className="w-full lethal-pill-active py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest">REGISTER CLIENT</button>
+                    <button 
+                      onClick={handleAddClient} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : (editingClient ? 'Update Client' : 'Register Client')}
+                    </button>
                   </>
                 )}
 
@@ -1582,8 +2784,15 @@ export default function App() {
                         </div>
                       </div>
                     )}
-                    <button onClick={handleAddClientTransaction} className="w-full lethal-pill-active py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase">
-                      {clientTransactionForm.type === 'CREDIT' ? 'Record Credit' : 'Record Payment'}
+                    <button 
+                      onClick={handleAddClientTransaction} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : (clientTransactionForm.type === 'CREDIT' ? 'Record Credit' : 'Record Payment')}
                     </button>
                   </>
                 )}
@@ -1594,24 +2803,18 @@ export default function App() {
                       <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STOCK NAME</label>
                       <input type="text" placeholder="STOCK NAME" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
                     </div>
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">SKU</label>
-                        <input type="text" placeholder="SKU" value={productForm.sku} onChange={e => setProductForm({ ...productForm, sku: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
-                      </div>
-                      <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STOCK</label>
-                        <input 
-                          type="number" 
-                          placeholder="STOCK" 
-                          value={productForm.stockQuantity ?? ''} 
-                          onChange={e => {
-                            const val = e.target.value;
-                            setProductForm({ ...productForm, stockQuantity: val === '' ? undefined : Number(val) });
-                          }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
-                        />
-                      </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STOCK</label>
+                      <input 
+                        type="number" 
+                        placeholder="STOCK" 
+                        value={productForm.stockQuantity ?? ''} 
+                        onChange={e => {
+                          const val = e.target.value;
+                          setProductForm({ ...productForm, stockQuantity: val === '' ? undefined : Number(val) });
+                        }} 
+                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                      />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
@@ -1641,7 +2844,16 @@ export default function App() {
                         />
                       </div>
                     </div>
-                    <button onClick={handleAddProduct} className="w-full lethal-pill-active py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest">EXECUTE STOCK COMMAND</button>
+                    <button 
+                      onClick={handleAddProduct} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : 'EXECUTE STOCK COMMAND'}
+                    </button>
                   </>
                 )}
 
@@ -1661,7 +2873,7 @@ export default function App() {
                       </div>
                       <div className="max-h-40 overflow-y-auto space-y-2 pr-2 no-scrollbar">
                         {products
-                          .filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()) || p.sku.toLowerCase().includes(modalSearch.toLowerCase()))
+                          .filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()))
                           .map(p => (
                             <button
                               key={p.id}
@@ -1680,7 +2892,7 @@ export default function App() {
                             </button>
                           ))
                         }
-                        {products.filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()) || p.sku.toLowerCase().includes(modalSearch.toLowerCase())).length === 0 && (
+                        {products.filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase())).length === 0 && (
                           <p className="text-center py-4 text-[10px] lethal-mono text-zinc-600">NO MATCHING STOCK FOUND</p>
                         )}
                       </div>
@@ -1732,7 +2944,16 @@ export default function App() {
                         ))}
                       </div>
                     </div>
-                    <button onClick={handleAddSale} className="w-full lethal-pill-active py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest">ADD TRANSACTION</button>
+                    <button 
+                      onClick={handleAddSale} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : 'ADD TRANSACTION'}
+                    </button>
                   </>
                 )}
                 
@@ -1752,7 +2973,7 @@ export default function App() {
                       </div>
                       <div className="max-h-40 overflow-y-auto space-y-2 pr-2 no-scrollbar">
                         {products
-                          .filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()) || p.sku.toLowerCase().includes(modalSearch.toLowerCase()))
+                          .filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()))
                           .map(p => (
                             <button
                               key={p.id}
@@ -1801,7 +3022,16 @@ export default function App() {
                         />
                       </div>
                     </div>
-                    <button onClick={handleAddRestock} className="w-full bg-emerald-500 text-black py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:bg-emerald-400 transition-all">EXECUTE RESTOCK</button>
+                    <button 
+                      onClick={handleAddRestock} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-emerald-500 text-black hover:bg-emerald-400"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : 'EXECUTE RESTOCK'}
+                    </button>
                   </>
                 )}
 
@@ -1836,7 +3066,16 @@ export default function App() {
                         className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
                       />
                     </div>
-                    <button onClick={handleAddExpense} className="w-full lethal-pill-active py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest">ADD EXPENDITURE</button>
+                    <button 
+                      onClick={handleAddExpense} 
+                      disabled={isSubmitting}
+                      className={cn(
+                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isSubmitting ? 'PROCESSING...' : 'ADD EXPENDITURE'}
+                    </button>
                   </>
                 )}
               </div>
@@ -1844,6 +3083,124 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      {/* Auth Modal for Role Transition */}
+      <AnimatePresence>
+        {authModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setAuthModal(prev => ({ ...prev, isOpen: false }))}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 30 }}
+              transition={{ type: "spring", damping: 25, stiffness: 400 }}
+              className="bg-lethal-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
+            >
+              <div className="space-y-2">
+                <p className="lethal-mono text-[10px] text-lethal-orange uppercase tracking-widest">AUTHENTICATION REQUIRED</p>
+                <h2 className="text-2xl font-bold text-white leading-tight">Enter Executive Password</h2>
+                <p className="text-zinc-500 text-xs">This area contains sensitive financial data and administrative controls.</p>
+              </div>
+              
+              <div className="space-y-4">
+                <div className="space-y-2">
+                  <label className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">PASSWORD</label>
+                  <input 
+                    type="password"
+                    value={authModal.password}
+                    onChange={(e) => setAuthModal(prev => ({ ...prev, password: e.target.value as any, error: '' }))}
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-lethal-orange transition-all"
+                    placeholder="••••••••"
+                    autoFocus
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') handleAuthSubmit();
+                    }}
+                  />
+                  {authModal.error && <p className="text-rose-500 text-[10px] lethal-mono uppercase">{authModal.error}</p>}
+                </div>
+              </div>
+
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setAuthModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
+                >
+                  CANCEL
+                </button>
+                <button 
+                  onClick={handleAuthSubmit}
+                  disabled={isSubmitting}
+                  className={cn(
+                    "flex-1 py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest transition-all",
+                    isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-lethal-orange text-black hover:bg-orange-600"
+                  )}
+                >
+                  {isSubmitting ? 'PROCESSING...' : 'VERIFY'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Confirmation Modal */}
+      <AnimatePresence>
+        {confirmModal.isOpen && (
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
+            <motion.div 
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
+            />
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0, y: 30 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.9, opacity: 0, y: 30 }}
+              transition={{ type: "spring", damping: 25, stiffness: 400 }}
+              className="bg-lethal-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
+            >
+              <div className="space-y-2">
+                <p className="lethal-mono text-[10px] text-lethal-orange uppercase tracking-widest">{confirmModal.title}</p>
+                <h2 className="text-2xl font-bold text-white leading-tight">{confirmModal.message}</h2>
+              </div>
+              
+              <div className="flex gap-4">
+                <button 
+                  onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
+                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
+                >
+                  CANCEL
+                </button>
+                <button 
+                  onClick={confirmModal.onConfirm}
+                  disabled={isSubmitting}
+                  className={cn(
+                    "flex-1 py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest transition-all",
+                    isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-rose-500 text-white hover:bg-rose-600"
+                  )}
+                >
+                  {isSubmitting ? 'PROCESSING...' : 'CONFIRM'}
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
+  );
+}
+
+export function AppWithErrorBoundary() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
   );
 }

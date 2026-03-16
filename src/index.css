@@ -27,7 +27,7 @@ body {
 .lethal-mono {
   font-family: var(--font-mono);
   text-transform: uppercase;
-  letter-spacing: 0.15em;
+  letter-spacing: 0.05em;
 }
 
 .lethal-card-orange {
@@ -44,5 +44,13 @@ body {
   background: var(--color-lethal-orange);
   color: black;
   box-shadow: 0 0 20px rgba(242, 125, 38, 0.3);
+}
+
+@utility no-scrollbar {
+  &::-webkit-scrollbar {
+    display: none;
+  }
+  -ms-overflow-style: none;
+  scrollbar-width: none;
 }
 

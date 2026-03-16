@@ -2,10 +2,17 @@ export type Category = 'Electronics' | 'Clothing' | 'Food' | 'Services' | 'Other
 export type ExpenseCategory = 'Rent' | 'Utilities' | 'Supplies' | 'Wages' | 'Other';
 export type PaymentMethod = 'Cash' | 'Credit' | 'Mobile Money Transfer' | 'Cheque' | 'Bank';
 
-export interface Product {
+export interface Store {
   id: string;
   name: string;
-  sku: string;
+  location?: string;
+  createdAt: string;
+}
+
+export interface Product {
+  id: string;
+  storeId: string;
+  name: string;
   category: string;
   unit: string;
   stockQuantity: number;
@@ -15,16 +22,19 @@ export interface Product {
 
 export interface Sale {
   id: string;
+  storeId: string;
   date: string;
   productId: string;
   quantity: number;
   sellingPrice: number;
+  buyingPrice: number; // Added for accurate profit calculation at time of sale
   discount: number;
   paymentMethod: PaymentMethod;
 }
 
 export interface Expense {
   id: string;
+  storeId: string;
   date: string;
   description: string;
   category: ExpenseCategory;
@@ -33,6 +43,7 @@ export interface Expense {
 
 export interface Restock {
   id: string;
+  storeId: string;
   date: string;
   productId: string;
   quantity: number;
@@ -50,6 +61,7 @@ export type UserRole = 'executive' | 'employee';
 
 export interface AlertRule {
   id: string;
+  storeId: string;
   name: string;
   type: AlertType;
   targetId?: string; // Product ID if applicable
@@ -60,6 +72,7 @@ export interface AlertRule {
 
 export interface TriggeredAlert {
   id: string;
+  storeId: string;
   ruleId: string;
   message: string;
   timestamp: string;
@@ -68,6 +81,7 @@ export interface TriggeredAlert {
 
 export interface Client {
   id: string;
+  storeId: string;
   name: string;
   phone: string;
   email?: string;
@@ -78,10 +92,19 @@ export interface Client {
 export interface ClientTransaction {
   id: string;
   clientId: string;
+  storeId: string;
   date: string;
   type: 'CREDIT' | 'PAYMENT';
   amount: number;
   description: string;
   productId?: string; // Optional: if it's credit for a specific product
   quantity?: number;
+}
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  role: UserRole;
+  displayName: string;
+  assignedStoreIds?: string[];
 }
