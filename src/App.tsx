@@ -169,8 +169,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
       }
 
       return (
-        <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-lethal-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
+        <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-rowina-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
             <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto text-rose-500">
               <AlertTriangle size={32} />
             </div>
@@ -180,7 +180,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
             </div>
             <button 
               onClick={() => window.location.reload()}
-              className="w-full bg-lethal-orange text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+              className="w-full bg-rowina-blue text-black py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
             >
               REBOOT SYSTEM
             </button>
@@ -233,8 +233,8 @@ const StatCard = ({
   const isGood = inverse ? !isPositive : isPositive;
   
   return (
-    <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
-      <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
+    <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+      <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
       <div className="mt-2">
         <p className={cn(
           "text-3xl sm:text-4xl font-bold tracking-tight",
@@ -242,7 +242,7 @@ const StatCard = ({
         )}>{value}</p>
       </div>
       <div className={cn(
-        "absolute bottom-5 right-6 flex items-center gap-1 lethal-mono text-[10px] font-bold",
+        "absolute bottom-5 right-6 flex items-center gap-1 rowina-mono text-[10px] font-bold",
         isGood ? "text-emerald-500" : "text-rose-500"
       )}>
         {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -268,18 +268,18 @@ export default function App() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('lethal_currency') || 'USD');
+  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('rowina_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
 
   const [appLockConfig, setAppLockConfig] = useState<{
     type: 'pin' | 'password' | null;
     value: string | null;
   }>(() => {
-    const saved = localStorage.getItem('lethal_lock_config');
+    const saved = localStorage.getItem('rowina_lock_config');
     return saved ? JSON.parse(saved) : { type: null, value: null };
   });
   const [isAppLocked, setIsAppLocked] = useState(() => {
-    const saved = localStorage.getItem('lethal_lock_config');
+    const saved = localStorage.getItem('rowina_lock_config');
     const config = saved ? JSON.parse(saved) : { type: null, value: null };
     return !!config.type;
   });
@@ -287,12 +287,23 @@ export default function App() {
   const [lockError, setLockError] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('lethal_lock_config', JSON.stringify(appLockConfig));
+    localStorage.setItem('rowina_lock_config', JSON.stringify(appLockConfig));
   }, [appLockConfig]);
 
   useEffect(() => {
-    localStorage.setItem('lethal_currency', currencyCode);
+    localStorage.setItem('rowina_currency', currencyCode);
   }, [currencyCode]);
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && appLockConfig.type) {
+        setIsAppLocked(true);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange);
+  }, [appLockConfig.type]);
+
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState<string | 'ALL'>('ALL');
   const [products, setProducts] = useState<Product[]>([]);
@@ -364,6 +375,51 @@ export default function App() {
   const [staffSearch, setStaffSearch] = useState('');
 
   const [staff, setStaff] = useState<{ id: string; email: string; role: UserRole; displayName?: string }[]>([]);
+
+  // PWA Install Logic
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [showInstallButton, setShowInstallButton] = useState(false);
+  const [isIOS, setIsIOS] = useState(false);
+  const [isStandalone, setIsStandalone] = useState(false);
+
+  useEffect(() => {
+    const ios = /iPad|iPhone|iPod/.test(navigator.userAgent) && !(window as any).MSStream;
+    const standalone = window.matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone;
+    setIsIOS(ios);
+    setIsStandalone(standalone);
+
+    const handleBeforeInstallPrompt = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+      setShowInstallButton(true);
+    };
+
+    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+
+    return () => {
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    };
+  }, []);
+
+  const handleInstallClick = async () => {
+    if (!deferredPrompt) {
+      if (isIOS) {
+        setConfirmModal({
+          isOpen: true,
+          title: 'INSTALL ON IOS',
+          message: 'To install Rowina Sales on your iPhone/iPad: tap the share button (square with arrow) in Safari and then select "Add to Home Screen".',
+          onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
+        });
+      }
+      return;
+    }
+    deferredPrompt.prompt();
+    const { outcome } = await deferredPrompt.userChoice;
+    if (outcome === 'accepted') {
+      setShowInstallButton(false);
+    }
+    setDeferredPrompt(null);
+  };
 
   const getDayStats = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -1122,8 +1178,8 @@ export default function App() {
     
     // Header
     doc.setFontSize(22);
-    doc.setTextColor(242, 125, 38); // Lethal Orange
-    doc.text('LETHAL FINANCE', 105, 20, { align: 'center' });
+    doc.setTextColor(10, 132, 255); // Rowina Blue
+    doc.text('ROWINA SALES TRACKER', 105, 20, { align: 'center' });
     
     doc.setFontSize(14);
     doc.setTextColor(100);
@@ -1160,7 +1216,7 @@ export default function App() {
       head: [['Metric', 'Value']],
       body: statsBody,
       theme: 'striped',
-      headStyles: { fillColor: [242, 125, 38] }
+      headStyles: { fillColor: [10, 132, 255] }
     });
 
     // Sales Table
@@ -1202,7 +1258,7 @@ export default function App() {
       });
     }
 
-    doc.save(`Lethal_Report_${reportDate}.pdf`);
+    doc.save(`Rowina_Report_${reportDate}.pdf`);
   };
 
   const handleLogin = async () => {
@@ -1327,6 +1383,13 @@ export default function App() {
     }
   };
 
+  const handleForgotLock = () => {
+    localStorage.removeItem('rowina_lock_config');
+    setAppLockConfig({ type: null, value: null });
+    setIsAppLocked(false);
+    handleLogout();
+  };
+
   const handleRoleSwitch = async (targetRole: UserRole) => {
     if (userRole === targetRole) return;
     
@@ -1382,10 +1445,10 @@ export default function App() {
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen bg-lethal-black flex items-center justify-center">
+      <div className="min-h-screen bg-rowina-black flex items-center justify-center">
         <div className="text-center space-y-4">
-          <div className="w-16 h-16 border-4 border-lethal-orange border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="lethal-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Intelligence Systems...</p>
+          <div className="w-16 h-16 border-4 border-rowina-blue border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="rowina-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Rowina Systems...</p>
         </div>
       </div>
     );
@@ -1393,15 +1456,15 @@ export default function App() {
 
   if (!user) {
     return (
-      <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
+      <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-12 text-center">
           <div className="space-y-4">
-            <h1 className="text-6xl sm:text-8xl lethal-title font-bold text-white">Lethal<br />Finance</h1>
-            <p className="lethal-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">Secure Operational Intelligence</p>
+            <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white">Rowina<br />Sales</h1>
+            <p className="rowina-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">Professional Sales Tracking</p>
           </div>
           
-          <div className="bg-lethal-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
-            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-lethal-orange">
+          <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
+            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-rowina-blue">
               <Shield size={32} />
             </div>
             <div className="space-y-2">
@@ -1413,7 +1476,7 @@ export default function App() {
               <button 
                 onClick={() => { setAuthMethod('email'); setLoginError(null); }}
                 className={cn(
-                  "flex-1 py-2 rounded-xl text-[10px] lethal-mono transition-all",
+                  "flex-1 py-2 rounded-xl text-[10px] rowina-mono transition-all",
                   authMethod === 'email' ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
@@ -1422,7 +1485,7 @@ export default function App() {
               <button 
                 onClick={() => { setAuthMethod('phone'); setLoginError(null); }}
                 className={cn(
-                  "flex-1 py-2 rounded-xl text-[10px] lethal-mono transition-all",
+                  "flex-1 py-2 rounded-xl text-[10px] rowina-mono transition-all",
                   authMethod === 'phone' ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
                 )}
               >
@@ -1433,28 +1496,28 @@ export default function App() {
             {authMethod === 'email' ? (
               <form onSubmit={handleEmailAuth} className="space-y-4">
                 <div className="space-y-2 text-left">
-                  <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Email Address</label>
+                  <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Email Address</label>
                   <input 
                     type="email" 
                     placeholder="EMAIL@EXAMPLE.COM" 
                     value={emailForm.email}
                     onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
-                    className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                    className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
                   />
                 </div>
                 <div className="space-y-2 text-left">
-                  <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Password</label>
+                  <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Password</label>
                   <input 
                     type="password" 
                     placeholder="••••••••" 
                     value={emailForm.password}
                     onChange={e => setEmailForm({ ...emailForm, password: e.target.value })}
-                    className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                    className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
                   />
                 </div>
 
                 {loginError && (
-                  <p className="text-rose-500 text-[10px] lethal-mono uppercase text-center animate-pulse">
+                  <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
                     {loginError}
                   </p>
                 )}
@@ -1463,8 +1526,8 @@ export default function App() {
                   type="submit"
                   disabled={isLoggingIn}
                   className={cn(
-                    "w-full py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                    isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                    "w-full py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                    isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                   )}
                 >
                   {isLoggingIn ? 'PROCESSING...' : authMode === 'login' ? 'SIGN IN' : 'REGISTER'}
@@ -1475,17 +1538,17 @@ export default function App() {
                 {!confirmationResult ? (
                   <form onSubmit={handleSendCode} className="space-y-4">
                     <div className="space-y-2 text-left">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Phone Number</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Phone Number</label>
                       <input 
                         type="tel" 
                         placeholder="+254 700 000 000" 
                         value={phoneNumber}
                         onChange={e => setPhoneNumber(e.target.value)}
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
                       />
                     </div>
                     {loginError && (
-                      <p className="text-rose-500 text-[10px] lethal-mono uppercase text-center animate-pulse">
+                      <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
                         {loginError}
                       </p>
                     )}
@@ -1494,8 +1557,8 @@ export default function App() {
                       type="submit"
                       disabled={isLoggingIn}
                       className={cn(
-                        "w-full py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isLoggingIn ? 'SENDING...' : 'SEND SMS CODE'}
@@ -1504,17 +1567,17 @@ export default function App() {
                 ) : (
                   <form onSubmit={handleVerifyCode} className="space-y-4">
                     <div className="space-y-2 text-left">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Verification Code</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Verification Code</label>
                       <input 
                         type="text" 
                         placeholder="123456" 
                         value={verificationCode}
                         onChange={e => setVerificationCode(e.target.value)}
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
                       />
                     </div>
                     {loginError && (
-                      <p className="text-rose-500 text-[10px] lethal-mono uppercase text-center animate-pulse">
+                      <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
                         {loginError}
                       </p>
                     )}
@@ -1522,8 +1585,8 @@ export default function App() {
                       type="submit"
                       disabled={isLoggingIn}
                       className={cn(
-                        "w-full py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isLoggingIn ? 'VERIFYING...' : 'VERIFY CODE'}
@@ -1531,7 +1594,7 @@ export default function App() {
                     <button 
                       type="button"
                       onClick={() => setConfirmationResult(null)}
-                      className="w-full text-[10px] lethal-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
+                      className="w-full text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
                     >
                       Change Number
                     </button>
@@ -1542,14 +1605,14 @@ export default function App() {
 
             <div className="flex items-center gap-4">
               <div className="h-px flex-1 bg-zinc-800" />
-              <span className="text-[8px] lethal-mono text-zinc-600 uppercase">OR</span>
+              <span className="text-[8px] rowina-mono text-zinc-600 uppercase">OR</span>
               <div className="h-px flex-1 bg-zinc-800" />
             </div>
 
             <button 
               onClick={handleLogin}
               disabled={isLoggingIn}
-              className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest hover:bg-zinc-700 transition-all flex items-center justify-center gap-3"
+              className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:bg-zinc-700 transition-all flex items-center justify-center gap-3"
             >
               <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
               CONTINUE WITH GOOGLE
@@ -1558,14 +1621,14 @@ export default function App() {
             <div className="pt-2">
               <button 
                 onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-                className="text-[10px] lethal-mono text-lethal-orange uppercase tracking-widest hover:underline"
+                className="text-[10px] rowina-mono text-rowina-blue uppercase tracking-widest hover:underline"
               >
                 {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Sign In"}
               </button>
             </div>
           </div>
           
-          <p className="text-[10px] lethal-mono text-zinc-700 uppercase tracking-widest">
+          <p className="text-[10px] rowina-mono text-zinc-700 uppercase tracking-widest">
             Authorized Personnel Only • Encrypted Session
           </p>
         </div>
@@ -1575,15 +1638,15 @@ export default function App() {
 
   if (isAppLocked && appLockConfig.type) {
     return (
-      <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
+      <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-12 text-center">
           <div className="space-y-4">
-            <h1 className="text-6xl sm:text-8xl lethal-title font-bold text-white">Lethal<br />Finance</h1>
-            <p className="lethal-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">System Locked</p>
+            <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white">Rowina<br />Sales</h1>
+            <p className="rowina-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">System Locked</p>
           </div>
           
-          <div className="bg-lethal-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
-            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-lethal-orange">
+          <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
+            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-rowina-blue">
               <Lock size={32} />
             </div>
             <div className="space-y-2">
@@ -1598,24 +1661,32 @@ export default function App() {
                 value={lockInput}
                 onChange={e => setLockInput(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleUnlock()}
-                className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-center text-2xl tracking-[0.5em] focus:border-lethal-orange outline-none transition-all"
+                className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-center text-2xl tracking-[0.5em] focus:border-rowina-blue outline-none transition-all"
                 autoFocus
               />
-              {lockError && <p className="text-rose-500 text-[10px] lethal-mono uppercase">{lockError}</p>}
+              {lockError && <p className="text-rose-500 text-[10px] rowina-mono uppercase">{lockError}</p>}
               <button 
                 onClick={handleUnlock}
-                className="w-full bg-lethal-orange text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+                className="w-full bg-rowina-blue text-black py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
               >
                 UNLOCK
               </button>
             </div>
             
-            <button 
-              onClick={handleLogout}
-              className="text-[10px] lethal-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
-            >
-              Switch Account
-            </button>
+            <div className="flex flex-col gap-4 pt-4">
+              <button 
+                onClick={handleForgotLock}
+                className="text-[10px] rowina-mono text-zinc-600 uppercase tracking-widest hover:text-rowina-blue transition-all"
+              >
+                Forgot {appLockConfig.type === 'pin' ? 'PIN' : 'Password'}? Reset via Logout
+              </button>
+              <button 
+                onClick={handleLogout}
+                className="text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
+              >
+                Switch Account
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1623,11 +1694,24 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-lethal-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
+    <div className="min-h-screen bg-rowina-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
+      {/* PWA Install Button */}
+      {(showInstallButton || (isIOS && !isStandalone)) && (
+        <motion.button
+          initial={{ opacity: 0, y: 20 }}
+          animate={{ opacity: 1, y: 0 }}
+          onClick={handleInstallClick}
+          className="fixed bottom-24 right-6 z-50 bg-rowina-blue text-black px-6 py-4 rounded-full font-bold rowina-mono text-xs tracking-widest shadow-2xl shadow-rowina-blue/20 flex items-center gap-3 hover:scale-105 transition-all active:scale-95"
+        >
+          <Download size={18} />
+          INSTALL ROWINA SALES
+        </motion.button>
+      )}
+
       {/* Header */}
       <header className="mb-12">
         <div className="flex justify-between items-start mb-4">
-          <h1 className="text-4xl sm:text-6xl lethal-title font-bold">Lethal<br />Finance</h1>
+          <h1 className="text-4xl sm:text-6xl rowina-title font-bold">Rowina<br />Sales</h1>
           <div className="flex gap-4 items-start">
             <div className="flex flex-col gap-2">
               {stores.length > 0 && (
@@ -1635,7 +1719,7 @@ export default function App() {
                   <select 
                     value={selectedStoreId}
                     onChange={(e) => setSelectedStoreId(e.target.value)}
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-[8px] lethal-mono text-zinc-300 focus:outline-none focus:border-lethal-orange transition-all appearance-none cursor-pointer pr-8"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-full px-4 py-1.5 text-[8px] rowina-mono text-zinc-300 focus:outline-none focus:border-rowina-blue transition-all appearance-none cursor-pointer pr-8"
                   >
                     {userRole === 'executive' && <option value="ALL">ALL STORES</option>}
                     {stores
@@ -1652,7 +1736,7 @@ export default function App() {
                 <button 
                   onClick={() => handleRoleSwitch('employee')}
                   className={cn(
-                    "px-3 py-1 rounded-full text-[8px] lethal-mono transition-all",
+                    "px-3 py-1 rounded-full text-[8px] rowina-mono transition-all",
                     userRole === 'employee' ? "bg-zinc-700 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
                   )}
                 >
@@ -1661,8 +1745,8 @@ export default function App() {
                 <button 
                   onClick={() => handleRoleSwitch('executive')}
                   className={cn(
-                    "px-3 py-1 rounded-full text-[8px] lethal-mono transition-all",
-                    userRole === 'executive' ? "bg-lethal-orange text-black font-bold" : "text-zinc-500 hover:text-zinc-300"
+                    "px-3 py-1 rounded-full text-[8px] rowina-mono transition-all",
+                    userRole === 'executive' ? "bg-rowina-blue text-black font-bold" : "text-zinc-500 hover:text-zinc-300"
                   )}
                 >
                   EXECUTIVE
@@ -1671,7 +1755,7 @@ export default function App() {
               <select 
                 value={currencyCode}
                 onChange={(e) => setCurrencyCode(e.target.value)}
-                className="bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 text-[8px] lethal-mono text-zinc-300 focus:outline-none focus:border-lethal-orange transition-all appearance-none cursor-pointer text-center"
+                className="bg-zinc-900 border border-zinc-800 rounded-full px-3 py-1 text-[8px] rowina-mono text-zinc-300 focus:outline-none focus:border-rowina-blue transition-all appearance-none cursor-pointer text-center"
               >
                 {EAST_AFRICAN_CURRENCIES.map(c => (
                   <option key={c.code} value={c.code}>{c.code} - {c.name}</option>
@@ -1683,18 +1767,28 @@ export default function App() {
                 onClick={() => setActiveTab('alerts')}
                 className={cn(
                   "w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center transition-all",
-                  triggeredAlerts.some(a => !a.isRead) ? "text-lethal-orange border-lethal-orange animate-pulse" : "text-zinc-500 hover:text-white hover:border-zinc-600"
+                  triggeredAlerts.some(a => !a.isRead) ? "text-rowina-blue border-rowina-blue animate-pulse" : "text-zinc-500 hover:text-white hover:border-zinc-600"
                 )}
               >
                 <Bell size={24} />
               </button>
               {triggeredAlerts.some(a => !a.isRead) && (
-                <span className="absolute top-0 right-0 w-3 h-3 bg-lethal-orange rounded-full border-2 border-lethal-black" />
+                <span className="absolute top-0 right-0 w-3 h-3 bg-rowina-blue rounded-full border-2 border-rowina-black" />
               )}
             </div>
+            {appLockConfig.type && (
+              <button 
+                onClick={() => setIsAppLocked(true)}
+                className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-rowina-blue hover:border-rowina-blue transition-all"
+                title="Lock App"
+              >
+                <Lock size={24} />
+              </button>
+            )}
             <button 
               onClick={handleLogout}
-              className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-lethal-orange hover:border-lethal-orange transition-all"
+              className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-rowina-blue hover:border-rowina-blue transition-all"
+              title="Logout"
             >
               <LogOut size={24} />
             </button>
@@ -1703,7 +1797,7 @@ export default function App() {
       </header>
 
       {/* Navigation */}
-      <nav className="bg-lethal-gray rounded-2xl p-1.5 flex mb-12 border border-zinc-800/50 gap-2 overflow-x-auto no-scrollbar items-center">
+      <nav className="bg-rowina-gray rounded-2xl p-1.5 flex mb-12 border border-zinc-800/50 gap-2 overflow-x-auto no-scrollbar items-center">
         {[
           { id: 'portfolio', label: 'PORTFOLIO' },
           { id: 'store', label: 'STORE' },
@@ -1719,9 +1813,9 @@ export default function App() {
             key={tab.id}
             onClick={() => setActiveTab(tab.id as Tab)}
             className={cn(
-              "flex-shrink-0 py-2 rounded-xl text-[9px] sm:text-[10px] font-bold lethal-mono transition-all duration-300 whitespace-nowrap px-3 sm:px-4",
+              "flex-shrink-0 py-2 rounded-xl text-[9px] sm:text-[10px] font-bold rowina-mono transition-all duration-300 whitespace-nowrap px-3 sm:px-4",
               activeTab === tab.id 
-                ? "lethal-pill-active" 
+                ? "rowina-pill-active" 
                 : "text-zinc-500 hover:text-zinc-300"
             )}
           >
@@ -1742,10 +1836,10 @@ export default function App() {
           >
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
               <div>
-                <h2 className="text-2xl font-bold lethal-title">
+                <h2 className="text-2xl font-bold rowina-title">
                   {timePeriod === 'daily' ? "Today's Overview" : "Portfolio Overview"}
                 </h2>
-                <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">
+                <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">
                   {timePeriod === 'daily' ? format(new Date(), 'MMMM dd, yyyy') : 'Aggregate Performance'}
                 </p>
               </div>
@@ -1754,7 +1848,7 @@ export default function App() {
                   <select 
                     value={timePeriod}
                     onChange={(e) => setTimePeriod(e.target.value as any)}
-                    className="w-full bg-lethal-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] lethal-mono font-bold text-zinc-400 focus:text-white focus:border-lethal-orange outline-none appearance-none cursor-pointer transition-all uppercase pr-8"
+                    className="w-full bg-rowina-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] rowina-mono font-bold text-zinc-400 focus:text-white focus:border-rowina-blue outline-none appearance-none cursor-pointer transition-all uppercase pr-8"
                   >
                     <option value="daily">TODAY</option>
                     <option value="weekly">LAST 7 DAYS</option>
@@ -1767,7 +1861,7 @@ export default function App() {
                   <select 
                     value={paymentMethodFilter}
                     onChange={(e) => setPaymentMethodFilter(e.target.value as any)}
-                    className="w-full bg-lethal-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] lethal-mono font-bold text-zinc-400 focus:text-white focus:border-lethal-orange outline-none appearance-none cursor-pointer transition-all uppercase pr-8"
+                    className="w-full bg-rowina-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] rowina-mono font-bold text-zinc-400 focus:text-white focus:border-rowina-blue outline-none appearance-none cursor-pointer transition-all uppercase pr-8"
                   >
                     <option value="ALL">ALL PAYMENTS</option>
                     <option value="Cash">CASH</option>
@@ -1807,13 +1901,13 @@ export default function App() {
                     trend={stats.trends.netProfit}
                     highlight={stats.current.netProfit >= 0 ? "emerald" : "rose"}
                   />
-                  <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
-                    <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Profit Margin</p>
+                  <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                    <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Profit Margin</p>
                     <div className="mt-2">
                       <p className="text-3xl sm:text-4xl font-bold tracking-tight text-white">{stats.current.margin.toFixed(1)}%</p>
                     </div>
                     <div className={cn(
-                      "absolute bottom-5 right-6 flex items-center gap-1 lethal-mono text-[10px] font-bold",
+                      "absolute bottom-5 right-6 flex items-center gap-1 rowina-mono text-[10px] font-bold",
                       stats.trends.margin >= 0 ? "text-emerald-500" : "text-rose-500"
                     )}>
                       {stats.trends.margin >= 0 ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -1825,17 +1919,17 @@ export default function App() {
             </div>
 
             {/* Weekly Performance Chart */}
-            <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-6">
+            <div className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl space-y-6">
               <div className="flex justify-between items-center">
-                <h3 className="lethal-mono text-xs font-bold text-lethal-orange tracking-widest uppercase">Last 7 Days</h3>
+                <h3 className="rowina-mono text-xs font-bold text-rowina-blue tracking-widest uppercase">Last 7 Days</h3>
                 <div className="flex gap-4">
                   <div className="flex items-center gap-2">
-                    <div className="w-2 h-2 rounded-full bg-lethal-orange" />
-                    <span className="text-[8px] lethal-mono text-zinc-500 uppercase">Sales</span>
+                    <div className="w-2 h-2 rounded-full bg-rowina-blue" />
+                    <span className="text-[8px] rowina-mono text-zinc-500 uppercase">Sales</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-zinc-600" />
-                    <span className="text-[8px] lethal-mono text-zinc-500 uppercase">Expenses</span>
+                    <span className="text-[8px] rowina-mono text-zinc-500 uppercase">Expenses</span>
                   </div>
                 </div>
               </div>
@@ -1869,7 +1963,7 @@ export default function App() {
                       }} 
                       itemStyle={{ padding: '2px 0' }}
                     />
-                    <Bar dataKey="sales" fill="#F27D26" radius={[4, 4, 0, 0]} barSize={20} />
+                    <Bar dataKey="sales" fill="#0A84FF" radius={[4, 4, 0, 0]} barSize={20} />
                     <Bar dataKey="expenses" fill="#333" radius={[4, 4, 0, 0]} barSize={20} />
                   </BarChart>
                 </ResponsiveContainer>
@@ -1878,10 +1972,10 @@ export default function App() {
 
             <div className="space-y-4 mt-8">
               <div className="flex justify-between items-center">
-                <h3 className="lethal-mono text-xs font-bold text-zinc-500">RECENT LOGS</h3>
+                <h3 className="rowina-mono text-xs font-bold text-zinc-500">RECENT LOGS</h3>
                 <div className="flex gap-2">
-                  <button onClick={() => setIsSaleModalOpen(true)} className="text-[10px] lethal-mono text-lethal-orange border border-lethal-orange/30 px-3 py-1 rounded-full hover:bg-lethal-orange/10 transition-all">ADD SALE</button>
-                  <button onClick={() => setIsExpenseModalOpen(true)} className="text-[10px] lethal-mono text-zinc-500 border border-zinc-800 px-3 py-1 rounded-full hover:bg-white/5 transition-all">ADD EXPENSE</button>
+                  <button onClick={() => setIsSaleModalOpen(true)} className="text-[10px] rowina-mono text-rowina-blue border border-rowina-blue/30 px-3 py-1 rounded-full hover:bg-rowina-blue/10 transition-all">ADD SALE</button>
+                  <button onClick={() => setIsExpenseModalOpen(true)} className="text-[10px] rowina-mono text-zinc-500 border border-zinc-800 px-3 py-1 rounded-full hover:bg-white/5 transition-all">ADD EXPENSE</button>
                 </div>
               </div>
               
@@ -1903,7 +1997,7 @@ export default function App() {
                       <div className="flex items-center gap-4">
                         <div className={cn(
                           "p-2 rounded-lg", 
-                          isSale ? "bg-lethal-orange/10 text-lethal-orange" : 
+                          isSale ? "bg-rowina-blue/10 text-rowina-blue" : 
                           isRestock ? "bg-emerald-500/10 text-emerald-500" : 
                           "bg-zinc-800 text-zinc-400"
                         )}>
@@ -1915,12 +2009,12 @@ export default function App() {
                           <p className="text-sm font-bold text-white">
                             {isSale || isRestock ? products.find(p => p.id === item.productId)?.name : (item as Expense).description}
                           </p>
-                          <p className="lethal-mono text-[8px] text-zinc-600">
+                          <p className="rowina-mono text-[8px] text-zinc-600">
                             {format(parseISO(item.date), 'MMM dd, yyyy')}
                             {isSale && (
                               <>
                                 <span className="ml-2">• QTY: {item.quantity}</span>
-                                <span className="ml-2 text-lethal-orange/60">• {(item as Sale).paymentMethod?.toUpperCase()}</span>
+                                <span className="ml-2 text-rowina-blue/60">• {(item as Sale).paymentMethod?.toUpperCase()}</span>
                                 {item.discount > 0 && <span className="ml-2 text-rose-500/80">• DISC: {f(item.discount)}</span>}
                               </>
                             )}
@@ -1934,7 +2028,7 @@ export default function App() {
                       </div>
                       <p className={cn(
                         "font-bold", 
-                        isSale ? "text-lethal-orange" : 
+                        isSale ? "text-rowina-blue" : 
                         isRestock ? "text-emerald-500" : 
                         "text-zinc-500"
                       )}>
@@ -1960,7 +2054,7 @@ export default function App() {
             {!selectedProductId ? (
               <>
                 <div className="flex justify-between items-center mb-6">
-                  <h2 className="text-2xl font-bold lethal-title">Stock Store</h2>
+                  <h2 className="text-2xl font-bold rowina-title">Stock Store</h2>
                   <div className="flex items-center gap-3">
                     <button 
                       onClick={() => {
@@ -1968,13 +2062,13 @@ export default function App() {
                         setModalSearch('');
                         setIsRestockModalOpen(true);
                       }}
-                      className="text-[10px] lethal-mono text-emerald-500 border border-emerald-500/30 px-4 py-2 rounded-full hover:bg-emerald-500/10 transition-all flex items-center gap-2"
+                      className="text-[10px] rowina-mono text-emerald-500 border border-emerald-500/30 px-4 py-2 rounded-full hover:bg-emerald-500/10 transition-all flex items-center gap-2"
                     >
                       <Package size={14} /> RESTOCK
                     </button>
                     <button 
                       onClick={() => setIsProductModalOpen(true)}
-                      className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+                      className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
                     >
                       <Plus size={20} />
                     </button>
@@ -1988,7 +2082,7 @@ export default function App() {
                     placeholder="SEARCH STOCK..."
                     value={productsSearch}
                     onChange={(e) => setProductsSearch(e.target.value)}
-                    className="w-full bg-lethal-gray border border-zinc-800 rounded-2xl pl-12 pr-4 py-3 text-xs lethal-mono focus:border-lethal-orange outline-none transition-all"
+                    className="w-full bg-rowina-gray border border-zinc-800 rounded-2xl pl-12 pr-4 py-3 text-xs rowina-mono focus:border-rowina-blue outline-none transition-all"
                   />
                 </div>
 
@@ -2007,23 +2101,23 @@ export default function App() {
                         <div 
                           key={product.id} 
                           onClick={() => setSelectedProductId(product.id)}
-                          className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center group cursor-pointer hover:border-lethal-orange/50 transition-all"
+                          className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center group cursor-pointer hover:border-rowina-blue/50 transition-all"
                         >
                           <div>
                             <h4 className="font-bold text-white mb-1">{product.name}</h4>
-                            <p className="lethal-mono text-[10px] text-zinc-500">{product.stockQuantity} {product.unit} REMAINING</p>
+                            <p className="rowina-mono text-[10px] text-zinc-500">{product.stockQuantity} {product.unit} REMAINING</p>
                             {userRole === 'executive' && (
-                              <p className="lethal-mono text-[9px] text-emerald-500 mt-2">TOTAL PROFIT: {f(totalProfit)}</p>
+                              <p className="rowina-mono text-[9px] text-emerald-500 mt-2">TOTAL PROFIT: {f(totalProfit)}</p>
                             )}
                           </div>
                           <div className="text-right">
                             <div className="flex items-center justify-end gap-2">
                               {userRole === 'executive' && (
-                                <span className="text-[10px] lethal-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                <span className="text-[10px] rowina-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
                                   {calculateMargin(product.buyingPrice, product.sellingPrice).toFixed(1)}%
                                 </span>
                               )}
-                              <p className="text-lethal-orange font-bold">{f(product.sellingPrice)}</p>
+                              <p className="text-rowina-blue font-bold">{f(product.sellingPrice)}</p>
                             </div>
                             <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
                               <button onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); }} className="text-zinc-500 hover:text-white"><Edit3 size={14} /></button>
@@ -2040,7 +2134,7 @@ export default function App() {
                 <div className="flex justify-between items-center">
                   <button 
                     onClick={() => setSelectedProductId(null)}
-                    className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors lethal-mono text-[10px] font-bold"
+                    className="flex items-center gap-2 text-zinc-500 hover:text-white transition-colors rowina-mono text-[10px] font-bold"
                   >
                     <ArrowLeft size={16} /> BACK TO STORE
                   </button>
@@ -2053,7 +2147,7 @@ export default function App() {
                         setIsRestockModalOpen(true);
                       }
                     }}
-                    className="flex items-center gap-2 text-emerald-500 hover:text-emerald-400 transition-colors lethal-mono text-[10px] font-bold border border-emerald-500/30 px-4 py-2 rounded-full"
+                    className="flex items-center gap-2 text-emerald-500 hover:text-emerald-400 transition-colors rowina-mono text-[10px] font-bold border border-emerald-500/30 px-4 py-2 rounded-full"
                   >
                     <Package size={14} /> RESTOCK UNIT
                   </button>
@@ -2073,36 +2167,36 @@ export default function App() {
                     <>
                       <div className="flex flex-col sm:flex-row justify-between items-start sm:items-end gap-4">
                         <div>
-                          <h2 className="text-2xl sm:text-4xl font-bold lethal-title mb-2">{product.name}</h2>
-                          <p className="lethal-mono text-[10px] sm:text-xs text-zinc-500">{product.category}</p>
+                          <h2 className="text-2xl sm:text-4xl font-bold rowina-title mb-2">{product.name}</h2>
+                          <p className="rowina-mono text-[10px] sm:text-xs text-zinc-500">{product.category}</p>
                         </div>
                         {userRole === 'executive' && (
                           <div className="text-left sm:text-right">
-                            <p className="lethal-mono text-[10px] text-zinc-500 mb-1 uppercase">Total Profit</p>
+                            <p className="rowina-mono text-[10px] text-zinc-500 mb-1 uppercase">Total Profit</p>
                             <p className="text-2xl sm:text-3xl font-bold text-emerald-500 break-all">{f(totalProfit)}</p>
                           </div>
                         )}
                       </div>
 
                       <div className={cn("grid gap-4", userRole === 'executive' ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2")}>
-                        <div className="bg-lethal-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
-                          <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">Stock</p>
+                        <div className="bg-rowina-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
+                          <p className="rowina-mono text-[10px] text-zinc-500 mb-2 uppercase">Stock</p>
                           <p className="text-lg sm:text-xl font-bold text-white break-all">{product.stockQuantity} {product.unit}</p>
                         </div>
                         {userRole === 'executive' && (
-                          <div className="bg-lethal-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
-                            <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">Buying Price</p>
+                          <div className="bg-rowina-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
+                            <p className="rowina-mono text-[10px] text-zinc-500 mb-2 uppercase">Buying Price</p>
                             <p className="text-lg sm:text-xl font-bold text-white break-all">{f(product.buyingPrice)}</p>
                           </div>
                         )}
-                        <div className="bg-lethal-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
-                          <p className="lethal-mono text-[10px] text-zinc-500 mb-2 uppercase">Selling Price</p>
-                          <p className="text-lg sm:text-xl font-bold text-lethal-orange break-all">{f(product.sellingPrice)}</p>
+                        <div className="bg-rowina-gray p-4 sm:p-6 rounded-3xl border border-zinc-800">
+                          <p className="rowina-mono text-[10px] text-zinc-500 mb-2 uppercase">Selling Price</p>
+                          <p className="text-lg sm:text-xl font-bold text-rowina-blue break-all">{f(product.sellingPrice)}</p>
                         </div>
                       </div>
 
                       <div className="space-y-4">
-                        <h3 className="lethal-mono text-xs font-bold text-zinc-500 uppercase tracking-widest">Sales History</h3>
+                        <h3 className="rowina-mono text-xs font-bold text-zinc-500 uppercase tracking-widest">Sales History</h3>
                         {productSales.length > 0 ? (
                           <div className="space-y-2">
                             {productSales
@@ -2111,15 +2205,15 @@ export default function App() {
                                 const buyingPrice = sale.buyingPrice ?? product.buyingPrice;
                                 const profit = round((sale.quantity * sale.sellingPrice) - sale.discount - (sale.quantity * buyingPrice));
                                 return (
-                                  <div key={sale.id} className="bg-lethal-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
+                                  <div key={sale.id} className="bg-rowina-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
                                     <div>
                                       <p className="text-sm font-bold text-white">QTY: {sale.quantity}</p>
-                                      <p className="lethal-mono text-[9px] text-zinc-500">{format(parseISO(sale.date), 'MMM dd, yyyy')}</p>
+                                      <p className="rowina-mono text-[9px] text-zinc-500">{format(parseISO(sale.date), 'MMM dd, yyyy')}</p>
                                     </div>
                                     <div className="text-right">
-                                      <p className="text-sm font-bold text-lethal-orange">{f((sale.quantity * sale.sellingPrice) - sale.discount)}</p>
+                                      <p className="text-sm font-bold text-rowina-blue">{f((sale.quantity * sale.sellingPrice) - sale.discount)}</p>
                                       {userRole === 'executive' && (
-                                        <p className="lethal-mono text-[9px] text-emerald-500">PROFIT: {f(profit)}</p>
+                                        <p className="rowina-mono text-[9px] text-emerald-500">PROFIT: {f(profit)}</p>
                                       )}
                                     </div>
                                   </div>
@@ -2127,8 +2221,8 @@ export default function App() {
                               })}
                           </div>
                         ) : (
-                          <div className="bg-lethal-gray/30 border border-dashed border-zinc-800 p-8 rounded-3xl text-center">
-                            <p className="lethal-mono text-[10px] text-zinc-600">NO SALES RECORDED FOR THIS UNIT</p>
+                          <div className="bg-rowina-gray/30 border border-dashed border-zinc-800 p-8 rounded-3xl text-center">
+                            <p className="rowina-mono text-[10px] text-zinc-600">NO SALES RECORDED FOR THIS UNIT</p>
                           </div>
                         )}
                       </div>
@@ -2149,15 +2243,15 @@ export default function App() {
             className="space-y-8"
           >
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold lethal-title">Financial Timeline</h2>
-              <div className="flex items-center gap-4 bg-lethal-gray p-1 rounded-xl border border-zinc-800">
+              <h2 className="text-2xl font-bold rowina-title">Financial Timeline</h2>
+              <div className="flex items-center gap-4 bg-rowina-gray p-1 rounded-xl border border-zinc-800">
                 <button 
                   onClick={() => setCurrentMonth(subMonths(currentMonth, 1))}
                   className="p-2 hover:bg-white/5 rounded-lg text-zinc-500 hover:text-white transition-all"
                 >
                   <ChevronLeft size={18} />
                 </button>
-                <span className="lethal-mono text-[10px] font-bold px-2 min-w-[120px] text-center uppercase tracking-widest">
+                <span className="rowina-mono text-[10px] font-bold px-2 min-w-[120px] text-center uppercase tracking-widest">
                   {format(currentMonth, 'MMMM yyyy')}
                 </span>
                 <button 
@@ -2169,10 +2263,10 @@ export default function App() {
               </div>
             </div>
 
-            <div className="bg-lethal-gray border border-zinc-800 rounded-3xl overflow-hidden">
+            <div className="bg-rowina-gray border border-zinc-800 rounded-3xl overflow-hidden">
               <div className="grid grid-cols-7 border-b border-zinc-800">
                 {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
-                  <div key={day} className="py-3 text-center lethal-mono text-[8px] font-bold text-zinc-600 uppercase tracking-widest">
+                  <div key={day} className="py-3 text-center rowina-mono text-[8px] font-bold text-zinc-600 uppercase tracking-widest">
                     {day}
                   </div>
                 ))}
@@ -2198,13 +2292,13 @@ export default function App() {
                         className={cn(
                           "min-h-[80px] p-2 border-r border-b border-zinc-800/50 flex flex-col items-start transition-all relative group",
                           !isCurrentMonth && "opacity-20",
-                          isSelected ? "bg-lethal-orange/10" : "hover:bg-white/5",
+                          isSelected ? "bg-rowina-blue/10" : "hover:bg-white/5",
                           i % 7 === 6 && "border-r-0"
                         )}
                       >
                         <span className={cn(
-                          "text-[10px] lethal-mono font-bold mb-1",
-                          isTodayDate ? "text-lethal-orange" : isSelected ? "text-white" : "text-zinc-500"
+                          "text-[10px] rowina-mono font-bold mb-1",
+                          isTodayDate ? "text-rowina-blue" : isSelected ? "text-white" : "text-zinc-500"
                         )}>
                           {format(day, 'd')}
                         </span>
@@ -2212,13 +2306,13 @@ export default function App() {
                         <div className="mt-auto w-full space-y-1">
                           {stats.revenue > 0 && (
                             <div className="space-y-0.5">
-                              <div className="h-1 w-full bg-lethal-orange/20 rounded-full overflow-hidden">
+                              <div className="h-1 w-full bg-rowina-blue/20 rounded-full overflow-hidden">
                                 <div 
-                                  className="h-full bg-lethal-orange" 
+                                  className="h-full bg-rowina-blue" 
                                   style={{ width: `${Math.min((stats.revenue / 1000) * 100, 100)}%` }}
                                 />
                               </div>
-                              <p className="text-[7px] lethal-mono text-lethal-orange font-bold">
+                              <p className="text-[7px] rowina-mono text-rowina-blue font-bold">
                                 {f(stats.revenue)}
                               </p>
                             </div>
@@ -2226,7 +2320,7 @@ export default function App() {
                           {stats.restockCost > 0 && (
                             <div className="flex items-center gap-1">
                               <div className="w-1 h-1 rounded-full bg-emerald-500 animate-pulse" />
-                              <p className="text-[6px] lethal-mono text-emerald-500 font-bold uppercase">Restocked</p>
+                              <p className="text-[6px] rowina-mono text-emerald-500 font-bold uppercase">Restocked</p>
                             </div>
                           )}
                         </div>
@@ -2234,7 +2328,7 @@ export default function App() {
                         {isSelected && (
                           <motion.div 
                             layoutId="calendar-select"
-                            className="absolute inset-0 border-2 border-lethal-orange rounded-sm pointer-events-none"
+                            className="absolute inset-0 border-2 border-rowina-blue rounded-sm pointer-events-none"
                           />
                         )}
                       </button>
@@ -2251,17 +2345,17 @@ export default function App() {
                 className="space-y-6"
               >
                 <div className="flex justify-between items-center">
-                  <h3 className="lethal-mono text-xs font-bold text-lethal-orange tracking-widest uppercase">
+                  <h3 className="rowina-mono text-xs font-bold text-rowina-blue tracking-widest uppercase">
                     LOGS FOR {format(selectedDate, 'MMMM dd, yyyy')}
                   </h3>
                   <div className="flex gap-4">
                     <div className="text-right">
-                      <p className="text-[8px] lethal-mono text-zinc-500 uppercase">Daily Revenue</p>
+                      <p className="text-[8px] rowina-mono text-zinc-500 uppercase">Daily Revenue</p>
                       <p className="text-sm font-bold text-white">{f(getDayStats(selectedDate).revenue)}</p>
                     </div>
                     {userRole === 'executive' && (
                       <div className="text-right">
-                        <p className="text-[8px] lethal-mono text-zinc-500 uppercase">Net Profit</p>
+                        <p className="text-[8px] rowina-mono text-zinc-500 uppercase">Net Profit</p>
                         <p className={cn(
                           "text-sm font-bold",
                           getDayStats(selectedDate).netProfit >= 0 ? "text-emerald-500" : "text-rose-500"
@@ -2274,8 +2368,8 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
-                    <h4 className="lethal-mono text-[10px] font-bold text-zinc-500 uppercase tracking-widest">TRANSACTIONS</h4>
+                  <div className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
+                    <h4 className="rowina-mono text-[10px] font-bold text-zinc-500 uppercase tracking-widest">TRANSACTIONS</h4>
                     {sales.filter(s => s.date === format(selectedDate, 'yyyy-MM-dd')).length > 0 ? (
                       <div className="space-y-3">
                         {sales.filter(s => s.date === format(selectedDate, 'yyyy-MM-dd')).map(sale => {
@@ -2284,59 +2378,59 @@ export default function App() {
                             <div key={sale.id} className="flex justify-between items-center py-2 border-b border-zinc-800/50 last:border-0">
                               <div>
                                 <p className="text-xs font-bold text-white">{product?.name || 'Unknown'}</p>
-                                <p className="text-[8px] lethal-mono text-zinc-600">QTY: {sale.quantity} • {sale.paymentMethod?.toUpperCase()} • {f(sale.sellingPrice)}/ea</p>
+                                <p className="text-[8px] rowina-mono text-zinc-600">QTY: {sale.quantity} • {sale.paymentMethod?.toUpperCase()} • {f(sale.sellingPrice)}/ea</p>
                               </div>
-                              <p className="text-xs font-bold text-lethal-orange">{f(sale.quantity * sale.sellingPrice - sale.discount)}</p>
+                              <p className="text-xs font-bold text-rowina-blue">{f(sale.quantity * sale.sellingPrice - sale.discount)}</p>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <p className="text-[10px] lethal-mono text-zinc-700 text-center py-4 italic">NO SALES RECORDED</p>
+                      <p className="text-[10px] rowina-mono text-zinc-700 text-center py-4 italic">NO SALES RECORDED</p>
                     )}
                   </div>
 
-                  <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
-                    <h4 className="lethal-mono text-[10px] font-bold text-zinc-500 uppercase tracking-widest">EXPENDITURES</h4>
+                  <div className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
+                    <h4 className="rowina-mono text-[10px] font-bold text-zinc-500 uppercase tracking-widest">EXPENDITURES</h4>
                     {expenses.filter(e => e.date === format(selectedDate, 'yyyy-MM-dd')).length > 0 ? (
                       <div className="space-y-3">
                         {expenses.filter(e => e.date === format(selectedDate, 'yyyy-MM-dd')).map(expense => (
                           <div key={expense.id} className="flex justify-between items-center py-2 border-b border-zinc-800/50 last:border-0">
                             <div>
                               <p className="text-xs font-bold text-white">{expense.description}</p>
-                              <p className="text-[8px] lethal-mono text-zinc-600 uppercase">{expense.category}</p>
+                              <p className="text-[8px] rowina-mono text-zinc-600 uppercase">{expense.category}</p>
                             </div>
                             <p className="text-xs font-bold text-zinc-400">{f(expense.amount)}</p>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-[10px] lethal-mono text-zinc-700 text-center py-4 italic">NO EXPENSES RECORDED</p>
+                      <p className="text-[10px] rowina-mono text-zinc-700 text-center py-4 italic">NO EXPENSES RECORDED</p>
                     )}
                   </div>
 
-                  <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-4 md:col-span-2">
-                    <h4 className="lethal-mono text-[10px] font-bold text-emerald-500 uppercase tracking-widest">INVENTORY RESTOCKS</h4>
+                  <div className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl space-y-4 md:col-span-2">
+                    <h4 className="rowina-mono text-[10px] font-bold text-emerald-500 uppercase tracking-widest">INVENTORY RESTOCKS</h4>
                     {restocks.filter(r => r.date === format(selectedDate, 'yyyy-MM-dd')).length > 0 ? (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         {restocks.filter(r => r.date === format(selectedDate, 'yyyy-MM-dd')).map(restock => {
                           const product = products.find(p => p.id === restock.productId);
                           return (
-                            <div key={restock.id} className="flex justify-between items-center py-3 px-4 bg-lethal-black/40 rounded-2xl border border-zinc-800/50">
+                            <div key={restock.id} className="flex justify-between items-center py-3 px-4 bg-rowina-black/40 rounded-2xl border border-zinc-800/50">
                               <div>
                                 <p className="text-xs font-bold text-white">{product?.name || 'Unknown'}</p>
-                                <p className="text-[8px] lethal-mono text-emerald-500 uppercase">ADDED {restock.quantity} {product?.unit || 'units'}</p>
+                                <p className="text-[8px] rowina-mono text-emerald-500 uppercase">ADDED {restock.quantity} {product?.unit || 'units'}</p>
                               </div>
                               <div className="text-right">
                                 <p className="text-xs font-bold text-zinc-400">{f(restock.quantity * restock.unitCost)}</p>
-                                <p className="text-[8px] lethal-mono text-zinc-600 uppercase">COST: {f(restock.unitCost)}/ea</p>
+                                <p className="text-[8px] rowina-mono text-zinc-600 uppercase">COST: {f(restock.unitCost)}/ea</p>
                               </div>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <p className="text-[10px] lethal-mono text-zinc-700 text-center py-4 italic">NO RESTOCKS RECORDED</p>
+                      <p className="text-[10px] rowina-mono text-zinc-700 text-center py-4 italic">NO RESTOCKS RECORDED</p>
                     )}
                   </div>
                 </div>
@@ -2354,14 +2448,14 @@ export default function App() {
             className="space-y-8"
           >
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold lethal-title">Client Ledger</h2>
+              <h2 className="text-2xl font-bold rowina-title">Client Ledger</h2>
               <button 
                 onClick={() => {
                   setEditingClient(null);
                   setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
                   setIsClientModalOpen(true);
                 }}
-                className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+                className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
               </button>
@@ -2374,7 +2468,7 @@ export default function App() {
                 placeholder="SEARCH CLIENTS..." 
                 value={clientsSearch}
                 onChange={e => setClientsSearch(e.target.value)}
-                className="w-full bg-lethal-gray border border-zinc-800 rounded-3xl pl-12 pr-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                className="w-full bg-rowina-gray border border-zinc-800 rounded-3xl pl-12 pr-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
               />
             </div>
 
@@ -2382,7 +2476,7 @@ export default function App() {
               {clients
                 .filter(c => c.name.toLowerCase().includes(clientsSearch.toLowerCase()) || c.phone.includes(clientsSearch))
                 .map(client => (
-                  <div key={client.id} className="bg-lethal-gray border border-zinc-800 rounded-3xl p-6 hover:border-zinc-700 transition-all">
+                  <div key={client.id} className="bg-rowina-gray border border-zinc-800 rounded-3xl p-6 hover:border-zinc-700 transition-all">
                     <div className="flex justify-between items-start mb-6">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
@@ -2390,11 +2484,11 @@ export default function App() {
                         </div>
                         <div>
                           <h3 className="text-lg font-bold text-white">{client.name}</h3>
-                          <p className="lethal-mono text-[9px] text-zinc-500 uppercase">{client.phone}</p>
+                          <p className="rowina-mono text-[9px] text-zinc-500 uppercase">{client.phone}</p>
                         </div>
                       </div>
                       <div className="text-right">
-                        <p className="lethal-mono text-[8px] text-zinc-500 uppercase mb-1">Outstanding Debt</p>
+                        <p className="rowina-mono text-[8px] text-zinc-500 uppercase mb-1">Outstanding Debt</p>
                         <p className={cn("text-xl font-bold", client.totalDebt > 0 ? "text-rose-500" : "text-emerald-500")}>
                           {f(client.totalDebt)}
                         </p>
@@ -2404,7 +2498,7 @@ export default function App() {
                     <div className="flex gap-3 mb-6">
                       <button 
                         onClick={() => { setSelectedClient(client); setIsClientTransactionModalOpen(true); }}
-                        className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-xl text-[10px] font-bold lethal-mono tracking-widest transition-all flex items-center justify-center gap-2"
+                        className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-xl text-[10px] font-bold rowina-mono tracking-widest transition-all flex items-center justify-center gap-2"
                       >
                         <CreditCard size={14} /> ADJUST BALANCE
                       </button>
@@ -2414,7 +2508,7 @@ export default function App() {
                           setClientForm({ name: client.name, phone: client.phone, email: client.email, totalDebt: client.totalDebt });
                           setIsClientModalOpen(true);
                         }}
-                        className="w-12 bg-zinc-800 hover:bg-lethal-orange/20 hover:text-lethal-orange text-zinc-500 rounded-xl flex items-center justify-center transition-all"
+                        className="w-12 bg-zinc-800 hover:bg-rowina-blue/20 hover:text-rowina-blue text-zinc-500 rounded-xl flex items-center justify-center transition-all"
                         title="Edit Client"
                       >
                         <Edit2 size={16} />
@@ -2429,14 +2523,14 @@ export default function App() {
                     </div>
 
                     <div className="pt-4 border-t border-zinc-800/50">
-                      <p className="lethal-mono text-[8px] text-zinc-600 uppercase mb-3 tracking-widest">Recent Ledger Entries</p>
+                      <p className="rowina-mono text-[8px] text-zinc-600 uppercase mb-3 tracking-widest">Recent Ledger Entries</p>
                       <div className="space-y-2">
                         {clientTransactions
                           .filter(t => t.clientId === client.id)
                           .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
                           .slice(0, 3)
                           .map(t => (
-                            <div key={t.id} className="flex justify-between items-center text-[10px] lethal-mono">
+                            <div key={t.id} className="flex justify-between items-center text-[10px] rowina-mono">
                               <div className="flex items-center gap-2">
                                 <span className={cn(
                                   "w-1 h-1 rounded-full",
@@ -2453,7 +2547,7 @@ export default function App() {
                             </div>
                           ))}
                         {clientTransactions.filter(t => t.clientId === client.id).length === 0 && (
-                          <p className="text-[9px] lethal-mono text-zinc-700 italic">No ledger activity recorded</p>
+                          <p className="text-[9px] rowina-mono text-zinc-700 italic">No ledger activity recorded</p>
                         )}
                       </div>
                     </div>
@@ -2471,22 +2565,22 @@ export default function App() {
             className="space-y-8"
           >
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold lethal-title">Intelligence Reports</h2>
+              <h2 className="text-2xl font-bold rowina-title">Intelligence Reports</h2>
               <button 
                 onClick={exportToPDF}
-                className="flex items-center gap-2 bg-lethal-orange text-black px-6 py-3 rounded-full font-bold lethal-mono text-[10px] tracking-widest hover:scale-105 transition-transform"
+                className="flex items-center gap-2 bg-rowina-blue text-black px-6 py-3 rounded-full font-bold rowina-mono text-[10px] tracking-widest hover:scale-105 transition-transform"
               >
                 <Download size={16} /> EXPORT PDF
               </button>
             </div>
 
-            <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
-              <label className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Select Report Date</label>
+            <div className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl space-y-4">
+              <label className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Select Report Date</label>
               <input 
                 type="date" 
                 value={reportDate}
                 onChange={(e) => setReportDate(e.target.value)}
-                className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none lethal-mono"
+                className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none rowina-mono"
               />
             </div>
 
@@ -2509,15 +2603,15 @@ export default function App() {
               return (
                 <div className="space-y-8">
                   <div className="grid grid-cols-1 gap-4">
-                    <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
-                      <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Revenue</p>
+                    <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                      <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Revenue</p>
                       <div className="mt-2">
                         <p className="text-3xl sm:text-4xl font-bold tracking-tight text-white">{f(revenue)}</p>
                       </div>
                     </div>
                     {userRole === 'executive' && (
-                      <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
-                        <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Profit</p>
+                      <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                        <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Profit</p>
                         <div className="mt-2">
                           <p className={cn("text-3xl sm:text-4xl font-bold tracking-tight", netProfit >= 0 ? "text-emerald-500" : "text-rose-500")}>
                             {f(netProfit)}
@@ -2528,43 +2622,43 @@ export default function App() {
                   </div>
 
                   <div className="space-y-4">
-                    <h3 className="lethal-mono text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Sales Log ({daySales.length})</h3>
+                    <h3 className="rowina-mono text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Sales Log ({daySales.length})</h3>
                     {daySales.length > 0 ? (
                       <div className="space-y-2">
                         {daySales.map(s => {
                           const product = products.find(p => p.id === s.productId);
                           return (
-                            <div key={s.id} className="bg-lethal-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
+                            <div key={s.id} className="bg-rowina-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
                               <div>
                                 <p className="text-sm font-bold text-white">{product?.name || 'Unknown'}</p>
-                                <p className="lethal-mono text-[9px] text-zinc-500">QTY: {s.quantity} • {s.paymentMethod}</p>
+                                <p className="rowina-mono text-[9px] text-zinc-500">QTY: {s.quantity} • {s.paymentMethod}</p>
                               </div>
-                              <p className="text-sm font-bold text-lethal-orange">{f(s.quantity * s.sellingPrice - s.discount)}</p>
+                              <p className="text-sm font-bold text-rowina-blue">{f(s.quantity * s.sellingPrice - s.discount)}</p>
                             </div>
                           );
                         })}
                       </div>
                     ) : (
-                      <p className="text-center py-8 text-[10px] lethal-mono text-zinc-700 italic border border-dashed border-zinc-800 rounded-3xl">NO SALES RECORDED FOR THIS DATE</p>
+                      <p className="text-center py-8 text-[10px] rowina-mono text-zinc-700 italic border border-dashed border-zinc-800 rounded-3xl">NO SALES RECORDED FOR THIS DATE</p>
                     )}
                   </div>
 
                   <div className="space-y-4">
-                    <h3 className="lethal-mono text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Expense Log ({dayExpenses.length})</h3>
+                    <h3 className="rowina-mono text-[10px] font-bold text-zinc-500 tracking-widest uppercase">Expense Log ({dayExpenses.length})</h3>
                     {dayExpenses.length > 0 ? (
                       <div className="space-y-2">
                         {dayExpenses.map(e => (
-                          <div key={e.id} className="bg-lethal-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
+                          <div key={e.id} className="bg-rowina-gray/50 border border-zinc-800/50 p-4 rounded-2xl flex justify-between items-center">
                             <div>
                               <p className="text-sm font-bold text-white">{e.description}</p>
-                              <p className="lethal-mono text-[9px] text-zinc-500">{e.category}</p>
+                              <p className="rowina-mono text-[9px] text-zinc-500">{e.category}</p>
                             </div>
                             <p className="text-sm font-bold text-rose-500">{f(e.amount)}</p>
                           </div>
                         ))}
                       </div>
                     ) : (
-                      <p className="text-center py-8 text-[10px] lethal-mono text-zinc-700 italic border border-dashed border-zinc-800 rounded-3xl">NO EXPENSES RECORDED FOR THIS DATE</p>
+                      <p className="text-center py-8 text-[10px] rowina-mono text-zinc-700 italic border border-dashed border-zinc-800 rounded-3xl">NO EXPENSES RECORDED FOR THIS DATE</p>
                     )}
                   </div>
                 </div>
@@ -2581,10 +2675,10 @@ export default function App() {
             className="space-y-8"
           >
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold lethal-title">Alert Command</h2>
+              <h2 className="text-2xl font-bold rowina-title">Alert Command</h2>
               <button 
                 onClick={() => setIsAlertModalOpen(true)}
-                className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+                className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
               </button>
@@ -2594,17 +2688,17 @@ export default function App() {
             {triggeredAlerts.length > 0 && (
               <div className="space-y-4">
                 <div className="flex justify-between items-center">
-                  <h3 className="lethal-mono text-[10px] font-bold text-lethal-orange tracking-widest">ACTIVE INCIDENTS</h3>
+                  <h3 className="rowina-mono text-[10px] font-bold text-rowina-blue tracking-widest">ACTIVE INCIDENTS</h3>
                   <div className="flex gap-4">
                     <button 
                       onClick={() => setTriggeredAlerts(triggeredAlerts.map(a => ({ ...a, isRead: true })))}
-                      className="text-[8px] lethal-mono text-zinc-500 hover:text-white transition-colors"
+                      className="text-[8px] rowina-mono text-zinc-500 hover:text-white transition-colors"
                     >
                       MARK ALL AS READ
                     </button>
                     <button 
                       onClick={() => setTriggeredAlerts([])}
-                      className="text-[8px] lethal-mono text-rose-500 hover:text-rose-400 transition-colors"
+                      className="text-[8px] rowina-mono text-rose-500 hover:text-rose-400 transition-colors"
                     >
                       CLEAR ALL
                     </button>
@@ -2616,7 +2710,7 @@ export default function App() {
                       key={alert.id} 
                       className={cn(
                         "p-4 rounded-2xl border flex gap-4 items-start transition-all",
-                        alert.isRead ? "bg-lethal-gray/30 border-zinc-800/50 opacity-60" : "bg-rose-500/10 border-rose-500/30"
+                        alert.isRead ? "bg-rowina-gray/30 border-zinc-800/50 opacity-60" : "bg-rose-500/10 border-rose-500/30"
                       )}
                     >
                       <div className={cn("p-2 rounded-lg mt-1", alert.isRead ? "bg-zinc-800 text-zinc-500" : "bg-rose-500 text-white")}>
@@ -2624,7 +2718,7 @@ export default function App() {
                       </div>
                       <div className="flex-1">
                         <p className={cn("text-xs font-bold", alert.isRead ? "text-zinc-400" : "text-white")}>{alert.message}</p>
-                        <p className="lethal-mono text-[8px] text-zinc-600 mt-1">{format(parseISO(alert.timestamp), 'HH:mm:ss • MMM dd')}</p>
+                        <p className="rowina-mono text-[8px] text-zinc-600 mt-1">{format(parseISO(alert.timestamp), 'HH:mm:ss • MMM dd')}</p>
                       </div>
                       {!alert.isRead && (
                         <button 
@@ -2642,24 +2736,24 @@ export default function App() {
 
             {/* Alert Rules Section */}
             <div className="space-y-4">
-              <h3 className="lethal-mono text-[10px] font-bold text-zinc-500 tracking-widest">WATCHLIST RULES</h3>
+              <h3 className="rowina-mono text-[10px] font-bold text-zinc-500 tracking-widest">WATCHLIST RULES</h3>
               {alerts.length === 0 ? (
-                <div className="bg-lethal-gray/30 border border-dashed border-zinc-800 p-12 rounded-[2rem] text-center">
+                <div className="bg-rowina-gray/30 border border-dashed border-zinc-800 p-12 rounded-[2rem] text-center">
                   <Activity className="mx-auto text-zinc-800 mb-4" size={32} />
-                  <p className="lethal-mono text-[10px] text-zinc-600">NO ACTIVE SURVEILLANCE RULES</p>
-                  <button onClick={() => setIsAlertModalOpen(true)} className="mt-4 text-[10px] lethal-mono text-lethal-orange hover:underline">INITIALIZE RULE</button>
+                  <p className="rowina-mono text-[10px] text-zinc-600">NO ACTIVE SURVEILLANCE RULES</p>
+                  <button onClick={() => setIsAlertModalOpen(true)} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
                 </div>
               ) : (
                 <div className="space-y-3">
                   {alerts.map((rule) => (
-                    <div key={rule.id} className="bg-lethal-gray border border-zinc-800 p-5 rounded-3xl flex justify-between items-center">
+                    <div key={rule.id} className="bg-rowina-gray border border-zinc-800 p-5 rounded-3xl flex justify-between items-center">
                       <div className="flex items-center gap-4">
-                        <div className={cn("p-3 rounded-xl", rule.isActive ? "bg-lethal-orange/10 text-lethal-orange" : "bg-zinc-800 text-zinc-600")}>
+                        <div className={cn("p-3 rounded-xl", rule.isActive ? "bg-rowina-blue/10 text-rowina-blue" : "bg-zinc-800 text-zinc-600")}>
                           <Shield size={18} />
                         </div>
                         <div>
                           <h4 className="font-bold text-white text-sm">{rule.name}</h4>
-                          <p className="lethal-mono text-[9px] text-zinc-500">
+                          <p className="rowina-mono text-[9px] text-zinc-500">
                             {rule.type.replace('_', ' ')} • THRESHOLD: {rule.type === 'SALES_TARGET' ? f(rule.threshold) : rule.threshold}
                           </p>
                         </div>
@@ -2669,7 +2763,7 @@ export default function App() {
                           onClick={() => handleToggleAlert(rule)}
                           className={cn(
                             "w-10 h-5 rounded-full relative transition-all",
-                            rule.isActive ? "bg-lethal-orange" : "bg-zinc-800"
+                            rule.isActive ? "bg-rowina-blue" : "bg-zinc-800"
                           )}
                         >
                           <div className={cn(
@@ -2695,12 +2789,12 @@ export default function App() {
             className="space-y-8"
           >
             <div className="space-y-2">
-              <h2 className="text-2xl font-bold lethal-title">Security Settings</h2>
-              <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Configure App Lock & Access</p>
+              <h2 className="text-2xl font-bold rowina-title">Security Settings</h2>
+              <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Configure App Lock & Access</p>
             </div>
 
-            <div className="bg-lethal-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">
-              <div className="flex items-center gap-4 text-lethal-orange">
+            <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">
+              <div className="flex items-center gap-4 text-rowina-blue">
                 <Fingerprint size={32} />
                 <div>
                   <h3 className="text-white font-bold">App Lock System</h3>
@@ -2713,8 +2807,8 @@ export default function App() {
                   <button 
                     onClick={() => setAppLockConfig({ ...appLockConfig, type: 'pin' })}
                     className={cn(
-                      "py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest transition-all border",
-                      appLockConfig.type === 'pin' ? "bg-lethal-orange text-black border-lethal-orange" : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600"
+                      "py-4 rounded-2xl font-bold rowina-mono text-[10px] tracking-widest transition-all border",
+                      appLockConfig.type === 'pin' ? "bg-rowina-blue text-black border-rowina-blue" : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600"
                     )}
                   >
                     PIN LOCK
@@ -2722,8 +2816,8 @@ export default function App() {
                   <button 
                     onClick={() => setAppLockConfig({ ...appLockConfig, type: 'password' })}
                     className={cn(
-                      "py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest transition-all border",
-                      appLockConfig.type === 'password' ? "bg-lethal-orange text-black border-lethal-orange" : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600"
+                      "py-4 rounded-2xl font-bold rowina-mono text-[10px] tracking-widest transition-all border",
+                      appLockConfig.type === 'password' ? "bg-rowina-blue text-black border-rowina-blue" : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600"
                     )}
                   >
                     PASSWORD LOCK
@@ -2733,7 +2827,7 @@ export default function App() {
                 {appLockConfig.type && (
                   <div className="space-y-4 animate-in fade-in slide-in-from-top-4">
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">
                         SET NEW {appLockConfig.type === 'pin' ? '4-DIGIT PIN' : 'PASSWORD'}
                       </label>
                       <input 
@@ -2741,7 +2835,7 @@ export default function App() {
                         placeholder={appLockConfig.type === 'pin' ? '0000' : '••••••••'}
                         value={appLockConfig.value || ''}
                         onChange={e => setAppLockConfig({ ...appLockConfig, value: e.target.value })}
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
                       />
                     </div>
                     <p className="text-[10px] text-zinc-500 italic px-2">
@@ -2755,7 +2849,7 @@ export default function App() {
                     setAppLockConfig({ type: null, value: null });
                     setIsAppLocked(false);
                   }}
-                  className="w-full py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest text-rose-500 border border-rose-500/20 hover:bg-rose-500/10 transition-all"
+                  className="w-full py-4 rounded-2xl font-bold rowina-mono text-[10px] tracking-widest text-rose-500 border border-rose-500/20 hover:bg-rose-500/10 transition-all"
                 >
                   DISABLE APP LOCK
                 </button>
@@ -2773,14 +2867,14 @@ export default function App() {
             className="space-y-8"
           >
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold lethal-title">Staff Command</h2>
+              <h2 className="text-2xl font-bold rowina-title">Staff Command</h2>
               <button 
                 onClick={() => {
                   setEditingStaff(null);
                   setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
                   setIsStaffModalOpen(true);
                 }}
-                className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+                className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
               </button>
@@ -2793,7 +2887,7 @@ export default function App() {
                 placeholder="SEARCH STAFF..." 
                 value={staffSearch}
                 onChange={e => setStaffSearch(e.target.value)}
-                className="w-full bg-lethal-gray border border-zinc-800 rounded-3xl pl-12 pr-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                className="w-full bg-rowina-gray border border-zinc-800 rounded-3xl pl-12 pr-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
               />
             </div>
 
@@ -2801,14 +2895,14 @@ export default function App() {
               {staff
                 .filter(s => s.email.toLowerCase().includes(staffSearch.toLowerCase()) || (s.displayName || '').toLowerCase().includes(staffSearch.toLowerCase()))
                 .map(member => (
-                  <div key={member.id} className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
+                  <div key={member.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
                     <div className="flex items-center gap-4">
                       <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
                         <Users size={24} />
                       </div>
                       <div>
                         <h4 className="font-bold text-white text-sm">{member.displayName || 'Unnamed Staff'}</h4>
-                        <p className="lethal-mono text-[9px] text-zinc-500 uppercase">{member.email}</p>
+                        <p className="rowina-mono text-[9px] text-zinc-500 uppercase">{member.email}</p>
                         <div className="flex flex-wrap gap-1 mt-1">
                           <button 
                             onClick={async () => {
@@ -2820,8 +2914,8 @@ export default function App() {
                               }
                             }}
                             className={cn(
-                              "px-2 py-0.5 rounded text-[8px] font-bold lethal-mono uppercase transition-all hover:scale-105",
-                              member.role === 'executive' ? "bg-lethal-orange/10 text-lethal-orange" : "bg-zinc-800 text-zinc-500"
+                              "px-2 py-0.5 rounded text-[8px] font-bold rowina-mono uppercase transition-all hover:scale-105",
+                              member.role === 'executive' ? "bg-rowina-blue/10 text-rowina-blue" : "bg-zinc-800 text-zinc-500"
                             )}
                           >
                             {member.role === 'executive' ? 'EXEC' : 'STAFF'}
@@ -2829,7 +2923,7 @@ export default function App() {
                           {member.assignedStoreIds?.map(storeId => {
                             const store = stores.find(s => s.id === storeId);
                             return store ? (
-                              <span key={storeId} className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[8px] font-bold lethal-mono uppercase">
+                              <span key={storeId} className="px-2 py-0.5 rounded bg-zinc-800 text-zinc-400 text-[8px] font-bold rowina-mono uppercase">
                                 {store.name}
                               </span>
                             ) : null;
@@ -2849,7 +2943,7 @@ export default function App() {
                           });
                           setIsStaffModalOpen(true);
                         }}
-                        className="p-2 text-zinc-500 hover:text-lethal-orange transition-colors"
+                        className="p-2 text-zinc-500 hover:text-rowina-blue transition-colors"
                       >
                         <Edit2 size={16} />
                       </button>
@@ -2874,14 +2968,14 @@ export default function App() {
             className="space-y-8"
           >
             <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold lethal-title">Store Command</h2>
+              <h2 className="text-2xl font-bold rowina-title">Store Command</h2>
               <button 
                 onClick={() => {
                   setEditingStore(null);
                   setStoreForm({ name: '', location: '' });
                   setIsStoreModalOpen(true);
                 }}
-                className="w-10 h-10 rounded-full lethal-pill-active flex items-center justify-center"
+                className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
               </button>
@@ -2889,14 +2983,14 @@ export default function App() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {stores.map(store => (
-                <div key={store.id} className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
+                <div key={store.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
                   <div className="flex items-center gap-4">
                     <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
                       <Package size={24} />
                     </div>
                     <div>
                       <h4 className="font-bold text-white text-sm">{store.name}</h4>
-                      <p className="lethal-mono text-[9px] text-zinc-500 uppercase">{store.location || 'NO LOCATION SET'}</p>
+                      <p className="rowina-mono text-[9px] text-zinc-500 uppercase">{store.location || 'NO LOCATION SET'}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2">
@@ -2910,7 +3004,7 @@ export default function App() {
                       disabled={isSubmitting}
                       className={cn(
                         "p-2 transition-colors",
-                        isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-lethal-orange"
+                        isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-rowina-blue"
                       )}
                     >
                       <Edit2 size={16} />
@@ -2934,7 +3028,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* FAB */}
-      <button className="fixed bottom-8 right-8 w-16 h-16 rounded-full lethal-pill-active flex items-center justify-center shadow-2xl z-40 hover:scale-110 transition-transform">
+      <button className="fixed bottom-8 right-8 w-16 h-16 rounded-full rowina-pill-active flex items-center justify-center shadow-2xl z-40 hover:scale-110 transition-transform">
         <MessageCircle size={28} />
       </button>
 
@@ -2948,10 +3042,10 @@ export default function App() {
               animate={{ y: 0, opacity: 1, scale: 1 }} 
               exit={{ y: 30, opacity: 0, scale: 0.98 }} 
               transition={{ type: "spring", damping: 25, stiffness: 350 }}
-              className="relative bg-lethal-gray border border-zinc-800 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl"
+              className="relative bg-rowina-gray border border-zinc-800 w-full max-w-md rounded-[2.5rem] p-10 shadow-2xl"
             >
               <div className="flex justify-between items-center mb-8">
-                <h3 className="text-2xl font-bold lethal-title">
+                <h3 className="text-2xl font-bold rowina-title">
                   {isProductModalOpen ? (editingProduct ? 'EDIT STOCK' : 'NEW STOCK') : isSaleModalOpen ? 'ADD SALE' : isExpenseModalOpen ? 'ADD EXPENSE' : isRestockModalOpen ? 'RESTOCK STOCK' : isAlertModalOpen ? 'NEW ALERT' : isClientModalOpen ? 'NEW CLIENT' : isStaffModalOpen ? (editingStaff ? 'EDIT STAFF' : 'NEW STAFF') : isStoreModalOpen ? (editingStore ? 'EDIT STORE' : 'NEW STORE') : 'ADJUST DEBT'}
                 </h3>
                 <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
@@ -2961,19 +3055,19 @@ export default function App() {
                 {isStoreModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STORE NAME</label>
-                      <input type="text" placeholder="NAME" value={storeForm.name} onChange={e => setStoreForm({ ...storeForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">STORE NAME</label>
+                      <input type="text" placeholder="NAME" value={storeForm.name} onChange={e => setStoreForm({ ...storeForm, name: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">LOCATION</label>
-                      <input type="text" placeholder="LOCATION" value={storeForm.location} onChange={e => setStoreForm({ ...storeForm, location: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">LOCATION</label>
+                      <input type="text" placeholder="LOCATION" value={storeForm.location} onChange={e => setStoreForm({ ...storeForm, location: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <button 
                       onClick={handleAddStore} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : (editingStore ? 'Update Store' : 'Initialize Store')}
@@ -2983,20 +3077,20 @@ export default function App() {
                 {isStaffModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">DISPLAY NAME</label>
-                      <input type="text" placeholder="NAME" value={staffForm.displayName} onChange={e => setStaffForm({ ...staffForm, displayName: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">DISPLAY NAME</label>
+                      <input type="text" placeholder="NAME" value={staffForm.displayName} onChange={e => setStaffForm({ ...staffForm, displayName: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">EMAIL ADDRESS</label>
-                      <input type="email" placeholder="EMAIL" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" disabled={!!editingStaff} />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">EMAIL ADDRESS</label>
+                      <input type="email" placeholder="EMAIL" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" disabled={!!editingStaff} />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">USER ROLE</label>
-                      <div className="flex bg-lethal-black p-1 rounded-2xl border border-zinc-800">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">USER ROLE</label>
+                      <div className="flex bg-rowina-black p-1 rounded-2xl border border-zinc-800">
                         <button 
                           onClick={() => setStaffForm({ ...staffForm, role: 'employee' })}
                           className={cn(
-                            "flex-1 py-3 rounded-xl text-[10px] font-bold lethal-mono transition-all",
+                            "flex-1 py-3 rounded-xl text-[10px] font-bold rowina-mono transition-all",
                             staffForm.role === 'employee' ? "bg-zinc-700 text-white" : "text-zinc-500"
                           )}
                         >
@@ -3005,8 +3099,8 @@ export default function App() {
                         <button 
                           onClick={() => setStaffForm({ ...staffForm, role: 'executive' })}
                           className={cn(
-                            "flex-1 py-3 rounded-xl text-[10px] font-bold lethal-mono transition-all",
-                            staffForm.role === 'executive' ? "bg-lethal-orange text-black" : "text-zinc-500"
+                            "flex-1 py-3 rounded-xl text-[10px] font-bold rowina-mono transition-all",
+                            staffForm.role === 'executive' ? "bg-rowina-blue text-black" : "text-zinc-500"
                           )}
                         >
                           EXECUTIVE
@@ -3014,7 +3108,7 @@ export default function App() {
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">ASSIGNED STORES</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">ASSIGNED STORES</label>
                       <div className="grid grid-cols-2 gap-2">
                         {stores.map(store => (
                           <button
@@ -3027,10 +3121,10 @@ export default function App() {
                               setStaffForm({ ...staffForm, assignedStoreIds: next });
                             }}
                             className={cn(
-                              "px-4 py-3 rounded-xl text-[8px] font-bold lethal-mono transition-all border",
+                              "px-4 py-3 rounded-xl text-[8px] font-bold rowina-mono transition-all border",
                               staffForm.assignedStoreIds?.includes(store.id) 
-                                ? "bg-lethal-orange/10 border-lethal-orange text-lethal-orange" 
-                                : "bg-lethal-black border-zinc-800 text-zinc-500"
+                                ? "bg-rowina-blue/10 border-rowina-blue text-rowina-blue" 
+                                : "bg-rowina-black border-zinc-800 text-zinc-500"
                             )}
                           >
                             {store.name.toUpperCase()}
@@ -3042,8 +3136,8 @@ export default function App() {
                       onClick={handleAddStaff} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : (editingStaff ? 'Update Profile' : 'Authorize Staff')}
@@ -3053,15 +3147,15 @@ export default function App() {
                 {isAlertModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">ALERT NAME</label>
-                      <input type="text" placeholder="ALERT NAME" value={alertForm.name} onChange={e => setAlertForm({ ...alertForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">ALERT NAME</label>
+                      <input type="text" placeholder="ALERT NAME" value={alertForm.name} onChange={e => setAlertForm({ ...alertForm, name: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">ALERT TYPE</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">ALERT TYPE</label>
                       <select 
                         value={alertForm.type} 
                         onChange={e => setAlertForm({ ...alertForm, type: e.target.value as AlertType })} 
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none appearance-none"
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none appearance-none"
                       >
                         <option value="LOW_STOCK">LOW STOCK WARNING</option>
                         <option value="SALES_TARGET">SALES TARGET REACHED</option>
@@ -3071,11 +3165,11 @@ export default function App() {
                     </div>
                     {(alertForm.type === 'LOW_STOCK' || alertForm.type === 'SALES_VELOCITY') && (
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">TARGET PRODUCT</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">TARGET PRODUCT</label>
                         <select 
                           value={alertForm.targetId} 
                           onChange={e => setAlertForm({ ...alertForm, targetId: e.target.value })} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none appearance-none"
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none appearance-none"
                         >
                           <option value="">SELECT PRODUCT...</option>
                           {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
@@ -3092,15 +3186,15 @@ export default function App() {
                           const val = e.target.value;
                           setAlertForm({ ...alertForm, threshold: val === '' ? undefined : Number(val) });
                         }} 
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                       />
                     </div>
                     <button 
                       onClick={handleAddAlert} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : 'INITIALIZE SURVEILLANCE'}
@@ -3110,27 +3204,27 @@ export default function App() {
 
                 {isClientModalOpen && (
                   <>
-                    <h2 className="text-xl font-bold lethal-title mb-6 uppercase tracking-widest">
+                    <h2 className="text-xl font-bold rowina-title mb-6 uppercase tracking-widest">
                       {editingClient ? 'Edit Client Profile' : 'Register New Client'}
                     </h2>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">CLIENT NAME</label>
-                      <input type="text" placeholder="FULL NAME" value={clientForm.name} onChange={e => setClientForm({ ...clientForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">CLIENT NAME</label>
+                      <input type="text" placeholder="FULL NAME" value={clientForm.name} onChange={e => setClientForm({ ...clientForm, name: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">PHONE NUMBER</label>
-                      <input type="text" placeholder="PHONE" value={clientForm.phone} onChange={e => setClientForm({ ...clientForm, phone: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">PHONE NUMBER</label>
+                      <input type="text" placeholder="PHONE" value={clientForm.phone} onChange={e => setClientForm({ ...clientForm, phone: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">EMAIL (OPTIONAL)</label>
-                      <input type="email" placeholder="EMAIL" value={clientForm.email} onChange={e => setClientForm({ ...clientForm, email: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">EMAIL (OPTIONAL)</label>
+                      <input type="email" placeholder="EMAIL" value={clientForm.email} onChange={e => setClientForm({ ...clientForm, email: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <button 
                       onClick={handleAddClient} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest uppercase transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : (editingClient ? 'Update Client' : 'Register Client')}
@@ -3141,12 +3235,12 @@ export default function App() {
                 {isClientTransactionModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">TRANSACTION TYPE</label>
-                      <div className="flex bg-lethal-black p-1 rounded-2xl border border-zinc-800">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">TRANSACTION TYPE</label>
+                      <div className="flex bg-rowina-black p-1 rounded-2xl border border-zinc-800">
                         <button 
                           onClick={() => setClientTransactionForm({ ...clientTransactionForm, type: 'CREDIT' })}
                           className={cn(
-                            "flex-1 py-3 rounded-xl text-[10px] font-bold lethal-mono transition-all",
+                            "flex-1 py-3 rounded-xl text-[10px] font-bold rowina-mono transition-all",
                             clientTransactionForm.type === 'CREDIT' ? "bg-rose-500 text-white" : "text-zinc-500"
                           )}
                         >
@@ -3155,7 +3249,7 @@ export default function App() {
                         <button 
                           onClick={() => setClientTransactionForm({ ...clientTransactionForm, type: 'PAYMENT' })}
                           className={cn(
-                            "flex-1 py-3 rounded-xl text-[10px] font-bold lethal-mono transition-all",
+                            "flex-1 py-3 rounded-xl text-[10px] font-bold rowina-mono transition-all",
                             clientTransactionForm.type === 'PAYMENT' ? "bg-emerald-500 text-white" : "text-zinc-500"
                           )}
                         >
@@ -3240,11 +3334,11 @@ export default function App() {
                 {isProductModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STOCK NAME</label>
-                      <input type="text" placeholder="STOCK NAME" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">STOCK NAME</label>
+                      <input type="text" placeholder="STOCK NAME" value={productForm.name} onChange={e => setProductForm({ ...productForm, name: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">STOCK</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">STOCK</label>
                       <input 
                         type="number" 
                         placeholder="STOCK" 
@@ -3253,12 +3347,12 @@ export default function App() {
                           const val = e.target.value;
                           setProductForm({ ...productForm, stockQuantity: val === '' ? undefined : Number(val) });
                         }} 
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                       />
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">BUYING PRICE</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">BUYING PRICE</label>
                         <input 
                           type="number" 
                           placeholder="BUYING" 
@@ -3267,11 +3361,11 @@ export default function App() {
                             const val = e.target.value;
                             setProductForm({ ...productForm, buyingPrice: val === '' ? undefined : Number(val) });
                           }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">SELLING PRICE</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">SELLING PRICE</label>
                         <input 
                           type="number" 
                           placeholder="SELLING" 
@@ -3280,7 +3374,7 @@ export default function App() {
                             const val = e.target.value;
                             setProductForm({ ...productForm, sellingPrice: val === '' ? undefined : Number(val) });
                           }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
                     </div>
@@ -3288,8 +3382,8 @@ export default function App() {
                       onClick={handleAddProduct} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : 'EXECUTE STOCK COMMAND'}
@@ -3300,7 +3394,7 @@ export default function App() {
                 {isSaleModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">TARGET STOCK</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">TARGET STOCK</label>
                       <div className="relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                         <input 
@@ -3308,7 +3402,7 @@ export default function App() {
                           placeholder="SEARCH STOCK..." 
                           value={modalSearch}
                           onChange={e => setModalSearch(e.target.value)}
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-xs lethal-mono focus:border-lethal-orange outline-none mb-2"
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-xs rowina-mono focus:border-rowina-blue outline-none mb-2"
                         />
                       </div>
                       <div className="max-h-40 overflow-y-auto space-y-2 pr-2 no-scrollbar">
@@ -3319,10 +3413,10 @@ export default function App() {
                               key={p.id}
                               onClick={() => setSaleForm({ ...saleForm, productId: p.id })}
                               className={cn(
-                                "w-full text-left px-4 py-3 rounded-xl text-xs lethal-mono transition-all border",
+                                "w-full text-left px-4 py-3 rounded-xl text-xs rowina-mono transition-all border",
                                 saleForm.productId === p.id 
-                                  ? "bg-lethal-orange/20 border-lethal-orange text-lethal-orange" 
-                                  : "bg-lethal-black border-zinc-800 text-zinc-400 hover:border-zinc-600"
+                                  ? "bg-rowina-blue/20 border-rowina-blue text-rowina-blue" 
+                                  : "bg-rowina-black border-zinc-800 text-zinc-400 hover:border-zinc-600"
                               )}
                             >
                               <div className="flex justify-between items-center">
@@ -3333,13 +3427,13 @@ export default function App() {
                           ))
                         }
                         {products.filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase())).length === 0 && (
-                          <p className="text-center py-4 text-[10px] lethal-mono text-zinc-600">NO MATCHING STOCK FOUND</p>
+                          <p className="text-center py-4 text-[10px] rowina-mono text-zinc-600">NO MATCHING STOCK FOUND</p>
                         )}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">QUANTITY</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">QUANTITY</label>
                         <input 
                           type="number" 
                           placeholder="QUANTITY" 
@@ -3348,11 +3442,11 @@ export default function App() {
                             const val = e.target.value;
                             setSaleForm({ ...saleForm, quantity: val === '' ? undefined : Number(val) });
                           }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">DISCOUNT</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">DISCOUNT</label>
                         <input 
                           type="number" 
                           placeholder="DISCOUNT" 
@@ -3361,22 +3455,22 @@ export default function App() {
                             const val = e.target.value;
                             setSaleForm({ ...saleForm, discount: val === '' ? undefined : Number(val) });
                           }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">PAYMENT METHOD</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">PAYMENT METHOD</label>
                       <div className="grid grid-cols-3 gap-2">
                         {(['Cash', 'Credit', 'Mobile Money Transfer', 'Cheque', 'Bank'] as PaymentMethod[]).map(method => (
                           <button
                             key={method}
                             onClick={() => setSaleForm({ ...saleForm, paymentMethod: method })}
                             className={cn(
-                              "py-2 px-1 rounded-xl text-[8px] lethal-mono border transition-all",
+                              "py-2 px-1 rounded-xl text-[8px] rowina-mono border transition-all",
                               saleForm.paymentMethod === method
-                                ? "bg-lethal-orange/20 border-lethal-orange text-lethal-orange"
-                                : "bg-lethal-black border-zinc-800 text-zinc-500 hover:border-zinc-700"
+                                ? "bg-rowina-blue/20 border-rowina-blue text-rowina-blue"
+                                : "bg-rowina-black border-zinc-800 text-zinc-500 hover:border-zinc-700"
                             )}
                           >
                             {method.toUpperCase()}
@@ -3388,8 +3482,8 @@ export default function App() {
                       onClick={handleAddSale} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : 'ADD TRANSACTION'}
@@ -3400,7 +3494,7 @@ export default function App() {
                 {isRestockModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">TARGET STOCK</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">TARGET STOCK</label>
                       <div className="relative">
                         <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={14} />
                         <input 
@@ -3408,7 +3502,7 @@ export default function App() {
                           placeholder="SEARCH STOCK..." 
                           value={modalSearch}
                           onChange={e => setModalSearch(e.target.value)}
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-xs lethal-mono focus:border-lethal-orange outline-none mb-2"
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl pl-10 pr-4 py-3 text-xs rowina-mono focus:border-rowina-blue outline-none mb-2"
                         />
                       </div>
                       <div className="max-h-40 overflow-y-auto space-y-2 pr-2 no-scrollbar">
@@ -3419,10 +3513,10 @@ export default function App() {
                               key={p.id}
                               onClick={() => setRestockForm({ ...restockForm, productId: p.id, unitCost: p.buyingPrice })}
                               className={cn(
-                                "w-full text-left px-4 py-3 rounded-xl text-xs lethal-mono transition-all border",
+                                "w-full text-left px-4 py-3 rounded-xl text-xs rowina-mono transition-all border",
                                 restockForm.productId === p.id 
                                   ? "bg-emerald-500/20 border-emerald-500 text-emerald-500" 
-                                  : "bg-lethal-black border-zinc-800 text-zinc-400 hover:border-zinc-600"
+                                  : "bg-rowina-black border-zinc-800 text-zinc-400 hover:border-zinc-600"
                               )}
                             >
                               <div className="flex justify-between items-center">
@@ -3436,7 +3530,7 @@ export default function App() {
                     </div>
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">RESTOCK QTY</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">RESTOCK QTY</label>
                         <input 
                           type="number" 
                           placeholder="QUANTITY" 
@@ -3445,11 +3539,11 @@ export default function App() {
                             const val = e.target.value;
                             setRestockForm({ ...restockForm, quantity: val === '' ? undefined : Number(val) });
                           }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] lethal-mono text-zinc-500 ml-2">UNIT COST</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">UNIT COST</label>
                         <input 
                           type="number" 
                           placeholder="COST" 
@@ -3458,7 +3552,7 @@ export default function App() {
                             const val = e.target.value;
                             setRestockForm({ ...restockForm, unitCost: val === '' ? undefined : Number(val) });
                           }} 
-                          className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
                     </div>
@@ -3466,7 +3560,7 @@ export default function App() {
                       onClick={handleAddRestock} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
                         isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-emerald-500 text-black hover:bg-emerald-400"
                       )}
                     >
@@ -3478,11 +3572,11 @@ export default function App() {
                 {isExpenseModalOpen && (
                   <>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">CATEGORY</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">CATEGORY</label>
                       <select 
                         value={expenseForm.category} 
                         onChange={e => setExpenseForm({ ...expenseForm, category: e.target.value as ExpenseCategory })} 
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none appearance-none"
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none appearance-none"
                       >
                         {['Rent', 'Utilities', 'Supplies', 'Wages', 'Other']
                           .map(c => <option key={c} value={c}>{c.toUpperCase()}</option>)
@@ -3490,11 +3584,11 @@ export default function App() {
                       </select>
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">DESCRIPTION</label>
-                      <input type="text" placeholder="DESCRIPTION" value={expenseForm.description} onChange={e => setExpenseForm({ ...expenseForm, description: e.target.value })} className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" />
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">DESCRIPTION</label>
+                      <input type="text" placeholder="DESCRIPTION" value={expenseForm.description} onChange={e => setExpenseForm({ ...expenseForm, description: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
                     <div className="space-y-2">
-                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2">AMOUNT</label>
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">AMOUNT</label>
                       <input 
                         type="number" 
                         placeholder="AMOUNT" 
@@ -3503,15 +3597,15 @@ export default function App() {
                           const val = e.target.value;
                           setExpenseForm({ ...expenseForm, amount: val === '' ? undefined : Number(val) });
                         }} 
-                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none" 
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                       />
                     </div>
                     <button 
                       onClick={handleAddExpense} 
                       disabled={isSubmitting}
                       className={cn(
-                        "w-full py-5 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
-                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                        "w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
+                        isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
                       {isSubmitting ? 'PROCESSING...' : 'ADD EXPENDITURE'}
@@ -3539,36 +3633,36 @@ export default function App() {
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 30 }}
               transition={{ type: "spring", damping: 25, stiffness: 400 }}
-              className="bg-lethal-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
+              className="bg-rowina-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
             >
               <div className="space-y-2">
-                <p className="lethal-mono text-[10px] text-lethal-orange uppercase tracking-widest">AUTHENTICATION REQUIRED</p>
+                <p className="rowina-mono text-[10px] text-rowina-blue uppercase tracking-widest">AUTHENTICATION REQUIRED</p>
                 <h2 className="text-2xl font-bold text-white leading-tight">Enter Executive Password</h2>
                 <p className="text-zinc-500 text-xs">This area contains sensitive financial data and administrative controls.</p>
               </div>
               
               <div className="space-y-4">
                 <div className="space-y-2">
-                  <label className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">PASSWORD</label>
+                  <label className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">PASSWORD</label>
                   <input 
                     type="password"
                     value={authModal.password}
                     onChange={(e) => setAuthModal(prev => ({ ...prev, password: e.target.value as any, error: '' }))}
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-lethal-orange transition-all"
+                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-rowina-blue transition-all"
                     placeholder="••••••••"
                     autoFocus
                     onKeyDown={(e) => {
                       if (e.key === 'Enter') handleAuthSubmit();
                     }}
                   />
-                  {authModal.error && <p className="text-rose-500 text-[10px] lethal-mono uppercase">{authModal.error}</p>}
+                  {authModal.error && <p className="text-rose-500 text-[10px] rowina-mono uppercase">{authModal.error}</p>}
                 </div>
               </div>
 
               <div className="flex gap-4">
                 <button 
                   onClick={() => setAuthModal(prev => ({ ...prev, isOpen: false }))}
-                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
+                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
                 >
                   CANCEL
                 </button>
@@ -3576,8 +3670,8 @@ export default function App() {
                   onClick={handleAuthSubmit}
                   disabled={isSubmitting}
                   className={cn(
-                    "flex-1 py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest transition-all",
-                    isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-lethal-orange text-black hover:bg-orange-600"
+                    "flex-1 py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest transition-all",
+                    isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-rowina-blue text-black hover:bg-blue-600"
                   )}
                 >
                   {isSubmitting ? 'PROCESSING...' : 'VERIFY'}
@@ -3604,17 +3698,17 @@ export default function App() {
               animate={{ scale: 1, opacity: 1, y: 0 }}
               exit={{ scale: 0.9, opacity: 0, y: 30 }}
               transition={{ type: "spring", damping: 25, stiffness: 400 }}
-              className="bg-lethal-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
+              className="bg-rowina-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
             >
               <div className="space-y-2">
-                <p className="lethal-mono text-[10px] text-lethal-orange uppercase tracking-widest">{confirmModal.title}</p>
+                <p className="rowina-mono text-[10px] text-rowina-blue uppercase tracking-widest">{confirmModal.title}</p>
                 <h2 className="text-2xl font-bold text-white leading-tight">{confirmModal.message}</h2>
               </div>
               
               <div className="flex gap-4">
                 <button 
                   onClick={() => setConfirmModal(prev => ({ ...prev, isOpen: false }))}
-                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
+                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
                 >
                   CANCEL
                 </button>
@@ -3622,7 +3716,7 @@ export default function App() {
                   onClick={confirmModal.onConfirm}
                   disabled={isSubmitting}
                   className={cn(
-                    "flex-1 py-4 rounded-2xl font-bold lethal-mono text-xs tracking-widest transition-all",
+                    "flex-1 py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest transition-all",
                     isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-rose-500 text-white hover:bg-rose-600"
                   )}
                 >
