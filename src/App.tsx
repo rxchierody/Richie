@@ -87,7 +87,8 @@ import {
   createUserWithEmailAndPassword,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  updateProfile
+  updateProfile,
+  sendEmailVerification
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { 
@@ -264,6 +265,7 @@ export default function App() {
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
   const [showAuthScreen, setShowAuthScreen] = useState(false);
+  const [verificationEmailSent, setVerificationEmailSent] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
@@ -1314,6 +1316,9 @@ export default function App() {
         const userCredential = await createUserWithEmailAndPassword(auth, emailForm.email, emailForm.password);
         // Set display name in profile
         await updateProfile(userCredential.user, { displayName: emailForm.username });
+        // Send verification email
+        await sendEmailVerification(userCredential.user);
+        setVerificationEmailSent(true);
         // Also update Firestore profile
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           id: userCredential.user.uid,
@@ -1322,6 +1327,8 @@ export default function App() {
           displayName: emailForm.username,
           assignedStoreIds: []
         });
+        // Don't close auth screen immediately if we want to show verification message
+        return;
       }
       setShowAuthScreen(false);
     } catch (error: any) {
@@ -1500,11 +1507,42 @@ export default function App() {
               <Shield size={32} />
             </div>
             <div className="space-y-2">
-              <h2 className="text-xl font-bold text-white">{authMode === 'login' ? 'Access Restricted' : 'Create Account'}</h2>
-              <p className="text-zinc-500 text-sm">Please authenticate to perform this action.</p>
+              <h2 className="text-xl font-bold text-white">{verificationEmailSent ? 'Check Your Inbox' : (authMode === 'login' ? 'Access Restricted' : 'Create Account')}</h2>
+              <p className="text-zinc-500 text-sm">{verificationEmailSent ? 'Please verify your email to continue.' : 'Please authenticate to perform this action.'}</p>
             </div>
 
-            <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
+            {verificationEmailSent ? (
+              <div className="space-y-6 py-4 text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
+                <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto text-emerald-500 mb-4">
+                  <Bell size={40} className="animate-bounce" />
+                </div>
+                <div className="space-y-2">
+                  <p className="text-zinc-400 text-sm leading-relaxed">
+                    A verification link has been sent to <span className="text-white font-medium">{emailForm.email}</span>. 
+                    Please verify your email to complete registration.
+                  </p>
+                </div>
+                <div className="pt-4 space-y-4">
+                  <button 
+                    onClick={() => {
+                      setVerificationEmailSent(false);
+                      setShowAuthScreen(false);
+                    }}
+                    className="w-full bg-rowina-blue text-black py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+                  >
+                    CONTINUE TO APP
+                  </button>
+                  <button 
+                    onClick={() => setVerificationEmailSent(false)}
+                    className="text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
+                  >
+                    Back to Sign In
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
               <button 
                 onClick={() => { setAuthMethod('email'); setLoginError(null); }}
                 className={cn(
@@ -1676,7 +1714,9 @@ export default function App() {
                 Continue as Guest
               </button>
             </div>
-          </div>
+          </>
+        )}
+      </div>
           
           <p className="text-[10px] rowina-mono text-zinc-700 uppercase tracking-widest">
             Authorized Personnel Only • Encrypted Session
@@ -1745,6 +1785,39 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-rowina-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
+      {/* Email Verification Warning */}
+      {user && !user.emailVerified && authMethod === 'email' && (
+        <motion.div 
+          initial={{ opacity: 0, y: -20 }}
+          animate={{ opacity: 1, y: 0 }}
+          className="mb-8 bg-amber-500/10 border border-amber-500/20 rounded-3xl p-6 flex flex-col sm:flex-row items-center gap-6 text-center sm:text-left"
+        >
+          <div className="w-12 h-12 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500 shrink-0">
+            <AlertTriangle size={24} />
+          </div>
+          <div className="flex-1 space-y-1">
+            <h3 className="text-amber-500 font-bold rowina-mono text-xs uppercase tracking-widest">Email Not Verified</h3>
+            <p className="text-zinc-400 text-[10px] leading-relaxed">
+              Please check your inbox and verify your email address to secure your account and access all features.
+            </p>
+          </div>
+          <button 
+            onClick={async () => {
+              try {
+                await sendEmailVerification(user);
+                setLoginError("VERIFICATION EMAIL RESENT");
+                setTimeout(() => setLoginError(null), 3000);
+              } catch (error) {
+                console.error("Resend failed:", error);
+              }
+            }}
+            className="px-6 py-3 bg-amber-500 text-black rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:scale-105 transition-all whitespace-nowrap"
+          >
+            RESEND EMAIL
+          </button>
+        </motion.div>
+      )}
+
       {/* PWA Install Button */}
       {(showInstallButton || (isIOS && !isStandalone)) && (
         <motion.button
