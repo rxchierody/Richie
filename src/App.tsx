@@ -110,6 +110,110 @@ import {
 type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
+const COUNTRY_CODES = [
+  { code: '+254', name: 'Kenya', flag: '🇰🇪' },
+  { code: '+255', name: 'Tanzania', flag: '🇹🇿' },
+  { code: '+256', name: 'Uganda', flag: '🇺🇬' },
+  { code: '+250', name: 'Rwanda', flag: '🇷🇼' },
+  { code: '+257', name: 'Burundi', flag: '🇧🇮' },
+  { code: '+211', name: 'South Sudan', flag: '🇸🇸' },
+  { code: '+251', name: 'Ethiopia', flag: '🇪🇹' },
+  { code: '+252', name: 'Somalia', flag: '🇸🇴' },
+  { code: '+243', name: 'DR Congo', flag: '🇨🇩' },
+  { code: '+234', name: 'Nigeria', flag: '🇳🇬' },
+  { code: '+233', name: 'Ghana', flag: '🇬🇭' },
+  { code: '+27', name: 'South Africa', flag: '🇿🇦' },
+  { code: '+1', name: 'USA/Canada', flag: '🇺🇸' },
+  { code: '+44', name: 'UK', flag: '🇬🇧' },
+  { code: '+91', name: 'India', flag: '🇮🇳' },
+  { code: '+86', name: 'China', flag: '🇨🇳' },
+  { code: '+971', name: 'UAE', flag: '🇦🇪' },
+  { code: '+20', name: 'Egypt', flag: '🇪🇬' },
+  { code: '+33', name: 'France', flag: '🇫🇷' },
+  { code: '+49', name: 'Germany', flag: '🇩🇪' },
+  { code: '+81', name: 'Japan', flag: '🇯🇵' },
+  { code: '+61', name: 'Australia', flag: '🇦🇺' },
+  { code: '+55', name: 'Brazil', flag: '🇧🇷' },
+  { code: '+7', name: 'Russia', flag: '🇷🇺' },
+  { code: '+39', name: 'Italy', flag: '🇮🇹' },
+  { code: '+34', name: 'Spain', flag: '🇪🇸' },
+  { code: '+52', name: 'Mexico', flag: '🇲🇽' },
+  { code: '+82', name: 'South Korea', flag: '🇰🇷' },
+  { code: '+62', name: 'Indonesia', flag: '🇮🇩' },
+  { code: '+90', name: 'Turkey', flag: '🇹🇷' },
+  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦' },
+  { code: '+41', name: 'Switzerland', flag: '🇨🇭' },
+  { code: '+46', name: 'Sweden', flag: '🇸🇪' },
+  { code: '+47', name: 'Norway', flag: '🇳🇴' },
+  { code: '+45', name: 'Denmark', flag: '🇩🇰' },
+  { code: '+31', name: 'Netherlands', flag: '🇳🇱' },
+  { code: '+32', name: 'Belgium', flag: '🇧🇪' },
+  { code: '+43', name: 'Austria', flag: '🇦🇹' },
+  { code: '+351', name: 'Portugal', flag: '🇵🇹' },
+  { code: '+30', name: 'Greece', flag: '🇬🇷' },
+  { code: '+353', name: 'Ireland', flag: '🇮🇪' },
+  { code: '+64', name: 'New Zealand', flag: '🇳🇿' },
+  { code: '+65', name: 'Singapore', flag: '🇸🇬' },
+  { code: '+60', name: 'Malaysia', flag: '🇲🇾' },
+  { code: '+66', name: 'Thailand', flag: '🇹🇭' },
+  { code: '+84', name: 'Vietnam', flag: '🇻🇳' },
+  { code: '+63', name: 'Philippines', flag: '🇵🇭' },
+  { code: '+92', name: 'Pakistan', flag: '🇵🇰' },
+  { code: '+880', name: 'Bangladesh', flag: '🇧🇩' },
+  { code: '+94', name: 'Sri Lanka', flag: '🇱🇰' },
+  { code: '+972', name: 'Israel', flag: '🇮🇱' },
+  { code: '+98', name: 'Iran', flag: '🇮🇷' },
+  { code: '+964', name: 'Iraq', flag: '🇮🇶' },
+  { code: '+965', name: 'Kuwait', flag: '🇰🇼' },
+  { code: '+968', name: 'Oman', flag: '🇴🇲' },
+  { code: '+974', name: 'Qatar', flag: '🇶🇦' },
+  { code: '+962', name: 'Jordan', flag: '🇯🇴' },
+  { code: '+961', name: 'Lebanon', flag: '🇱🇧' },
+  { code: '+963', name: 'Syria', flag: '🇸🇾' },
+  { code: '+967', name: 'Yemen', flag: '🇾🇪' },
+  { code: '+212', name: 'Morocco', flag: '🇲🇦' },
+  { code: '+213', name: 'Algeria', flag: '🇩🇿' },
+  { code: '+216', name: 'Tunisia', flag: '🇹🇳' },
+  { code: '+218', name: 'Libya', flag: '🇱🇾' },
+  { code: '+249', name: 'Sudan', flag: '🇸🇩' },
+  { code: '+221', name: 'Senegal', flag: '🇸🇳' },
+  { code: '+225', name: 'Ivory Coast', flag: '🇨🇮' },
+  { code: '+237', name: 'Cameroon', flag: '🇨🇲' },
+  { code: '+258', name: 'Mozambique', flag: '🇲🇿' },
+  { code: '+260', name: 'Zambia', flag: '🇿🇲' },
+  { code: '+263', name: 'Zimbabwe', flag: '🇿🇼' },
+  { code: '+264', name: 'Namibia', flag: '🇳🇦' },
+  { code: '+267', name: 'Botswana', flag: '🇧🇼' },
+  { code: '+230', name: 'Mauritius', flag: '🇲🇺' },
+  { code: '+248', name: 'Seychelles', flag: '🇸🇨' },
+  { code: '+262', name: 'Reunion', flag: '🇷🇪' },
+  { code: '+261', name: 'Madagascar', flag: '🇲🇬' },
+  { code: '+241', name: 'Gabon', flag: '🇬🇦' },
+  { code: '+242', name: 'Congo', flag: '🇨🇬' },
+  { code: '+220', name: 'Gambia', flag: '🇬🇲' },
+  { code: '+231', name: 'Liberia', flag: '🇱🇷' },
+  { code: '+232', name: 'Sierra Leone', flag: '🇸🇱' },
+  { code: '+224', name: 'Guinea', flag: '🇬🇳' },
+  { code: '+223', name: 'Mali', flag: '🇲🇱' },
+  { code: '+227', name: 'Niger', flag: '🇳🇪' },
+  { code: '+226', name: 'Burkina Faso', flag: '🇧🇫' },
+  { code: '+228', name: 'Togo', flag: '🇹🇬' },
+  { code: '+229', name: 'Benin', flag: '🇧🇯' },
+  { code: '+235', name: 'Chad', flag: '🇹🇩' },
+  { code: '+236', name: 'Central African Republic', flag: '🇨🇫' },
+  { code: '+240', name: 'Equatorial Guinea', flag: '🇬🇶' },
+  { code: '+253', name: 'Djibouti', flag: '🇩🇯' },
+  { code: '+291', name: 'Eritrea', flag: '🇪🇷' },
+  { code: '+265', name: 'Malawi', flag: '🇲🇼' },
+  { code: '+266', name: 'Lesotho', flag: '🇱🇸' },
+  { code: '+268', name: 'Eswatini', flag: '🇸🇿' },
+  { code: '+239', name: 'Sao Tome and Principe', flag: '🇸🇹' },
+  { code: '+238', name: 'Cape Verde', flag: '🇨🇻' },
+  { code: '+244', name: 'Angola', flag: '🇦🇴' },
+  { code: '+245', name: 'Guinea-Bissau', flag: '🇬🇼' },
+  { code: '+222', name: 'Mauritania', flag: '🇲🇷' },
+].sort((a, b) => a.name.localeCompare(b.name));
+
 enum OperationType {
   CREATE = 'create',
   UPDATE = 'update',
@@ -261,6 +365,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [countryCode, setCountryCode] = useState('+254');
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
@@ -1375,11 +1480,13 @@ export default function App() {
     try {
       setupRecaptcha();
       const appVerifier = (window as any).recaptchaVerifier;
-      const result = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+      // Prepend country code if not present
+      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber.startsWith('0') ? phoneNumber.slice(1) : phoneNumber}`;
+      const result = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
       setConfirmationResult(result);
     } catch (error: any) {
       console.error("SMS send failed:", error);
-      setLoginError("FAILED TO SEND SMS. USE FORMAT: +254...");
+      setLoginError("FAILED TO SEND SMS. CHECK NUMBER FORMAT.");
       if ((window as any).recaptchaVerifier) {
         (window as any).recaptchaVerifier.clear();
         (window as any).recaptchaVerifier = null;
@@ -1621,13 +1728,27 @@ export default function App() {
                   <form onSubmit={handleSendCode} className="space-y-4">
                     <div className="space-y-2 text-left">
                       <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Phone Number</label>
-                      <input 
-                        type="tel" 
-                        placeholder="+254 700 000 000" 
-                        value={phoneNumber}
-                        onChange={e => setPhoneNumber(e.target.value)}
-                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                      />
+                      <div className="flex gap-2">
+                        <div className="relative w-32 shrink-0">
+                          <select 
+                            value={countryCode}
+                            onChange={e => setCountryCode(e.target.value)}
+                            className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-4 py-4 text-sm focus:border-rowina-blue outline-none transition-all appearance-none cursor-pointer"
+                          >
+                            {COUNTRY_CODES.map(c => (
+                              <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
+                            ))}
+                          </select>
+                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" size={12} />
+                        </div>
+                        <input 
+                          type="tel" 
+                          placeholder="700 000 000" 
+                          value={phoneNumber}
+                          onChange={e => setPhoneNumber(e.target.value)}
+                          className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
+                        />
+                      </div>
                     </div>
                     {loginError && (
                       <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
