@@ -696,9 +696,9 @@ export default function App() {
     async function testConnection() {
       try {
         await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error) {
-        if(error instanceof Error && error.message.includes('the client is offline')) {
-          console.error("Please check your Firebase configuration. ");
+      } catch (error: any) {
+        if (error?.code === 'unavailable' || (error instanceof Error && error.message.includes('the client is offline'))) {
+          console.error("Firebase Connection Error: Cloud Firestore backend is unreachable. Please verify your Firebase configuration and ensure the database is provisioned.");
         }
       }
     }
