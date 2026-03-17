@@ -35,7 +35,10 @@ import {
   Users,
   CreditCard,
   FileText,
-  Download
+  Download,
+  Lock,
+  Key,
+  Fingerprint
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -102,7 +105,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores';
+type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 enum OperationType {
@@ -267,6 +270,25 @@ export default function App() {
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('lethal_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
+
+  const [appLockConfig, setAppLockConfig] = useState<{
+    type: 'pin' | 'password' | null;
+    value: string | null;
+  }>(() => {
+    const saved = localStorage.getItem('lethal_lock_config');
+    return saved ? JSON.parse(saved) : { type: null, value: null };
+  });
+  const [isAppLocked, setIsAppLocked] = useState(() => {
+    const saved = localStorage.getItem('lethal_lock_config');
+    const config = saved ? JSON.parse(saved) : { type: null, value: null };
+    return !!config.type;
+  });
+  const [lockInput, setLockInput] = useState('');
+  const [lockError, setLockError] = useState<string | null>(null);
+
+  useEffect(() => {
+    localStorage.setItem('lethal_lock_config', JSON.stringify(appLockConfig));
+  }, [appLockConfig]);
 
   useEffect(() => {
     localStorage.setItem('lethal_currency', currencyCode);
@@ -1294,6 +1316,17 @@ export default function App() {
     }
   };
 
+  const handleUnlock = () => {
+    if (lockInput === appLockConfig.value) {
+      setIsAppLocked(false);
+      setLockInput('');
+      setLockError(null);
+    } else {
+      setLockError('INVALID ' + (appLockConfig.type === 'pin' ? 'PIN' : 'PASSWORD'));
+      setLockInput('');
+    }
+  };
+
   const handleRoleSwitch = async (targetRole: UserRole) => {
     if (userRole === targetRole) return;
     
@@ -1540,6 +1573,55 @@ export default function App() {
     );
   }
 
+  if (isAppLocked && appLockConfig.type) {
+    return (
+      <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
+        <div className="max-w-md w-full space-y-12 text-center">
+          <div className="space-y-4">
+            <h1 className="text-6xl sm:text-8xl lethal-title font-bold text-white">Lethal<br />Finance</h1>
+            <p className="lethal-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">System Locked</p>
+          </div>
+          
+          <div className="bg-lethal-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
+            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-lethal-orange">
+              <Lock size={32} />
+            </div>
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold text-white">Enter {appLockConfig.type === 'pin' ? 'PIN' : 'Password'}</h2>
+              <p className="text-zinc-500 text-sm">Unlock your session to continue.</p>
+            </div>
+
+            <div className="space-y-4">
+              <input 
+                type={appLockConfig.type === 'pin' ? 'number' : 'password'}
+                placeholder={appLockConfig.type === 'pin' ? '••••' : 'PASSWORD'}
+                value={lockInput}
+                onChange={e => setLockInput(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && handleUnlock()}
+                className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-center text-2xl tracking-[0.5em] focus:border-lethal-orange outline-none transition-all"
+                autoFocus
+              />
+              {lockError && <p className="text-rose-500 text-[10px] lethal-mono uppercase">{lockError}</p>}
+              <button 
+                onClick={handleUnlock}
+                className="w-full bg-lethal-orange text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+              >
+                UNLOCK
+              </button>
+            </div>
+            
+            <button 
+              onClick={handleLogout}
+              className="text-[10px] lethal-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
+            >
+              Switch Account
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-lethal-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
       {/* Header */}
@@ -1631,6 +1713,7 @@ export default function App() {
           { id: 'alerts', label: 'ALERTS' },
           { id: 'staff', label: 'STAFF' },
           { id: 'stores', label: 'STORES' },
+          { id: 'security', label: 'SECURITY' },
         ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores')).map((tab) => (
           <button
             key={tab.id}
@@ -2605,6 +2688,82 @@ export default function App() {
             </div>
           </motion.div>
         )}
+        {activeTab === 'security' && (
+          <motion.div 
+            initial={{ opacity: 0, y: 20 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="space-y-8"
+          >
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold lethal-title">Security Settings</h2>
+              <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Configure App Lock & Access</p>
+            </div>
+
+            <div className="bg-lethal-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">
+              <div className="flex items-center gap-4 text-lethal-orange">
+                <Fingerprint size={32} />
+                <div>
+                  <h3 className="text-white font-bold">App Lock System</h3>
+                  <p className="text-zinc-500 text-xs">Secure your dashboard with a local PIN or password.</p>
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                <div className="grid grid-cols-2 gap-4">
+                  <button 
+                    onClick={() => setAppLockConfig({ ...appLockConfig, type: 'pin' })}
+                    className={cn(
+                      "py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest transition-all border",
+                      appLockConfig.type === 'pin' ? "bg-lethal-orange text-black border-lethal-orange" : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600"
+                    )}
+                  >
+                    PIN LOCK
+                  </button>
+                  <button 
+                    onClick={() => setAppLockConfig({ ...appLockConfig, type: 'password' })}
+                    className={cn(
+                      "py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest transition-all border",
+                      appLockConfig.type === 'password' ? "bg-lethal-orange text-black border-lethal-orange" : "bg-zinc-900 text-zinc-500 border-zinc-800 hover:border-zinc-600"
+                    )}
+                  >
+                    PASSWORD LOCK
+                  </button>
+                </div>
+
+                {appLockConfig.type && (
+                  <div className="space-y-4 animate-in fade-in slide-in-from-top-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">
+                        SET NEW {appLockConfig.type === 'pin' ? '4-DIGIT PIN' : 'PASSWORD'}
+                      </label>
+                      <input 
+                        type={appLockConfig.type === 'pin' ? 'number' : 'password'}
+                        placeholder={appLockConfig.type === 'pin' ? '0000' : '••••••••'}
+                        value={appLockConfig.value || ''}
+                        onChange={e => setAppLockConfig({ ...appLockConfig, value: e.target.value })}
+                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                      />
+                    </div>
+                    <p className="text-[10px] text-zinc-500 italic px-2">
+                      * This lock is stored locally on this device. You will still need to log in with your account if you clear your browser data.
+                    </p>
+                  </div>
+                )}
+
+                <button 
+                  onClick={() => {
+                    setAppLockConfig({ type: null, value: null });
+                    setIsAppLocked(false);
+                  }}
+                  className="w-full py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest text-rose-500 border border-rose-500/20 hover:bg-rose-500/10 transition-all"
+                >
+                  DISABLE APP LOCK
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+
         {activeTab === 'staff' && userRole === 'executive' && (
           <motion.div
             key="staff"
