@@ -63,6 +63,8 @@ import {
   endOfMonth, 
   startOfWeek, 
   endOfWeek, 
+  startOfDay,
+  endOfDay,
   eachDayOfInterval, 
   isSameMonth, 
   isSameDay, 
@@ -77,7 +79,11 @@ import {
   onAuthStateChanged, 
   signInWithPopup, 
   GoogleAuthProvider, 
-  signOut
+  signOut,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  RecaptchaVerifier,
+  signInWithPhoneNumber
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { 
@@ -247,13 +253,24 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
+  const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
+  const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
+  const [confirmationResult, setConfirmationResult] = useState<any>(null);
+  const [emailForm, setEmailForm] = useState({ email: '', password: '' });
+  const [loginError, setLoginError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
-  const [timePeriod, setTimePeriod] = useState<TimePeriod>('weekly');
+  const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [currencyCode, setCurrencyCode] = useState('USD');
+  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('lethal_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
+
+  useEffect(() => {
+    localStorage.setItem('lethal_currency', currencyCode);
+  }, [currencyCode]);
   const [stores, setStores] = useState<Store[]>([]);
   const [selectedStoreId, setSelectedStoreId] = useState<string | 'ALL'>('ALL');
   const [products, setProducts] = useState<Product[]>([]);
@@ -523,9 +540,9 @@ export default function App() {
 
     switch (timePeriod) {
       case 'daily':
-        currentStart = subDays(now, 1);
-        previousStart = subDays(now, 2);
-        previousEnd = subDays(now, 1);
+        currentStart = startOfDay(now);
+        previousStart = startOfDay(subDays(now, 1));
+        previousEnd = endOfDay(subDays(now, 1));
         break;
       case 'weekly':
         currentStart = subDays(now, 7);
@@ -1169,13 +1186,109 @@ export default function App() {
   const handleLogin = async () => {
     if (isLoggingIn) return;
     setIsLoggingIn(true);
+    setLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
       await signInWithPopup(auth, provider);
     } catch (error: any) {
       if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
         console.error("Login failed:", error);
+        setLoginError("GOOGLE SIGN-IN FAILED");
       }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleEmailAuth = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoggingIn) return;
+    if (!emailForm.email || !emailForm.password) {
+      setLoginError("EMAIL AND PASSWORD REQUIRED");
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      if (authMode === 'login') {
+        await signInWithEmailAndPassword(auth, emailForm.email, emailForm.password);
+      } else {
+        await createUserWithEmailAndPassword(auth, emailForm.email, emailForm.password);
+      }
+    } catch (error: any) {
+      console.error("Email auth failed:", error);
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        setLoginError("INVALID EMAIL OR PASSWORD");
+      } else if (error.code === 'auth/email-already-in-use') {
+        setLoginError("EMAIL ALREADY REGISTERED");
+      } else if (error.code === 'auth/weak-password') {
+        setLoginError("PASSWORD TOO WEAK (MIN 6 CHARS)");
+      } else {
+        setLoginError("AUTHENTICATION FAILED");
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const setupRecaptcha = () => {
+    if (!(window as any).recaptchaVerifier) {
+      try {
+        (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+          'size': 'invisible',
+          'callback': () => {
+            // reCAPTCHA solved
+          }
+        });
+      } catch (error) {
+        console.error("Recaptcha init failed:", error);
+      }
+    }
+  };
+
+  const handleSendCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoggingIn) return;
+    if (!phoneNumber) {
+      setLoginError("PHONE NUMBER REQUIRED");
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      setupRecaptcha();
+      const appVerifier = (window as any).recaptchaVerifier;
+      const result = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
+      setConfirmationResult(result);
+    } catch (error: any) {
+      console.error("SMS send failed:", error);
+      setLoginError("FAILED TO SEND SMS. USE FORMAT: +254...");
+      if ((window as any).recaptchaVerifier) {
+        (window as any).recaptchaVerifier.clear();
+        (window as any).recaptchaVerifier = null;
+      }
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleVerifyCode = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (isLoggingIn || !confirmationResult) return;
+    if (!verificationCode) {
+      setLoginError("VERIFICATION CODE REQUIRED");
+      return;
+    }
+
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      await confirmationResult.confirm(verificationCode);
+    } catch (error: any) {
+      console.error("Verification failed:", error);
+      setLoginError("INVALID VERIFICATION CODE");
     } finally {
       setIsLoggingIn(false);
     }
@@ -1259,16 +1372,164 @@ export default function App() {
               <Shield size={32} />
             </div>
             <div className="space-y-2">
-              <h2 className="text-xl font-bold text-white">Access Restricted</h2>
+              <h2 className="text-xl font-bold text-white">{authMode === 'login' ? 'Access Restricted' : 'Create Account'}</h2>
               <p className="text-zinc-500 text-sm">Please authenticate to access the operational dashboard.</p>
             </div>
+
+            <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
+              <button 
+                onClick={() => { setAuthMethod('email'); setLoginError(null); }}
+                className={cn(
+                  "flex-1 py-2 rounded-xl text-[10px] lethal-mono transition-all",
+                  authMethod === 'email' ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                EMAIL
+              </button>
+              <button 
+                onClick={() => { setAuthMethod('phone'); setLoginError(null); }}
+                className={cn(
+                  "flex-1 py-2 rounded-xl text-[10px] lethal-mono transition-all",
+                  authMethod === 'phone' ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
+                )}
+              >
+                PHONE
+              </button>
+            </div>
+
+            {authMethod === 'email' ? (
+              <form onSubmit={handleEmailAuth} className="space-y-4">
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Email Address</label>
+                  <input 
+                    type="email" 
+                    placeholder="EMAIL@EXAMPLE.COM" 
+                    value={emailForm.email}
+                    onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
+                    className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                  />
+                </div>
+                <div className="space-y-2 text-left">
+                  <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Password</label>
+                  <input 
+                    type="password" 
+                    placeholder="••••••••" 
+                    value={emailForm.password}
+                    onChange={e => setEmailForm({ ...emailForm, password: e.target.value })}
+                    className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                  />
+                </div>
+
+                {loginError && (
+                  <p className="text-rose-500 text-[10px] lethal-mono uppercase text-center animate-pulse">
+                    {loginError}
+                  </p>
+                )}
+
+                <button 
+                  type="submit"
+                  disabled={isLoggingIn}
+                  className={cn(
+                    "w-full py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                    isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                  )}
+                >
+                  {isLoggingIn ? 'PROCESSING...' : authMode === 'login' ? 'SIGN IN' : 'REGISTER'}
+                </button>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                {!confirmationResult ? (
+                  <form onSubmit={handleSendCode} className="space-y-4">
+                    <div className="space-y-2 text-left">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Phone Number</label>
+                      <input 
+                        type="tel" 
+                        placeholder="+254 700 000 000" 
+                        value={phoneNumber}
+                        onChange={e => setPhoneNumber(e.target.value)}
+                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                      />
+                    </div>
+                    {loginError && (
+                      <p className="text-rose-500 text-[10px] lethal-mono uppercase text-center animate-pulse">
+                        {loginError}
+                      </p>
+                    )}
+                    <div id="recaptcha-container"></div>
+                    <button 
+                      type="submit"
+                      disabled={isLoggingIn}
+                      className={cn(
+                        "w-full py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isLoggingIn ? 'SENDING...' : 'SEND SMS CODE'}
+                    </button>
+                  </form>
+                ) : (
+                  <form onSubmit={handleVerifyCode} className="space-y-4">
+                    <div className="space-y-2 text-left">
+                      <label className="text-[10px] lethal-mono text-zinc-500 ml-2 uppercase">Verification Code</label>
+                      <input 
+                        type="text" 
+                        placeholder="123456" 
+                        value={verificationCode}
+                        onChange={e => setVerificationCode(e.target.value)}
+                        className="w-full bg-lethal-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-lethal-orange outline-none transition-all"
+                      />
+                    </div>
+                    {loginError && (
+                      <p className="text-rose-500 text-[10px] lethal-mono uppercase text-center animate-pulse">
+                        {loginError}
+                      </p>
+                    )}
+                    <button 
+                      type="submit"
+                      disabled={isLoggingIn}
+                      className={cn(
+                        "w-full py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest transition-all",
+                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "lethal-pill-active"
+                      )}
+                    >
+                      {isLoggingIn ? 'VERIFYING...' : 'VERIFY CODE'}
+                    </button>
+                    <button 
+                      type="button"
+                      onClick={() => setConfirmationResult(null)}
+                      className="w-full text-[10px] lethal-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
+                    >
+                      Change Number
+                    </button>
+                  </form>
+                )}
+              </div>
+            )}
+
+            <div className="flex items-center gap-4">
+              <div className="h-px flex-1 bg-zinc-800" />
+              <span className="text-[8px] lethal-mono text-zinc-600 uppercase">OR</span>
+              <div className="h-px flex-1 bg-zinc-800" />
+            </div>
+
             <button 
               onClick={handleLogin}
-              className="w-full bg-lethal-orange text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all flex items-center justify-center gap-3"
+              disabled={isLoggingIn}
+              className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold lethal-mono text-[10px] tracking-widest hover:bg-zinc-700 transition-all flex items-center justify-center gap-3"
             >
               <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
-              SIGN IN WITH GOOGLE
+              CONTINUE WITH GOOGLE
             </button>
+
+            <div className="pt-2">
+              <button 
+                onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
+                className="text-[10px] lethal-mono text-lethal-orange uppercase tracking-widest hover:underline"
+              >
+                {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Sign In"}
+              </button>
+            </div>
           </div>
           
           <p className="text-[10px] lethal-mono text-zinc-700 uppercase tracking-widest">
@@ -1397,13 +1658,33 @@ export default function App() {
             className="space-y-6"
           >
             <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-              <h2 className="text-2xl font-bold lethal-title">Portfolio Overview</h2>
+              <div>
+                <h2 className="text-2xl font-bold lethal-title">
+                  {timePeriod === 'daily' ? "Today's Overview" : "Portfolio Overview"}
+                </h2>
+                <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">
+                  {timePeriod === 'daily' ? format(new Date(), 'MMMM dd, yyyy') : 'Aggregate Performance'}
+                </p>
+              </div>
               <div className="flex flex-wrap gap-3 w-full md:w-auto">
+                <div className="relative flex-1 md:flex-none">
+                  <select 
+                    value={timePeriod}
+                    onChange={(e) => setTimePeriod(e.target.value as any)}
+                    className="w-full bg-lethal-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] lethal-mono font-bold text-zinc-400 focus:text-white focus:border-lethal-orange outline-none appearance-none cursor-pointer transition-all uppercase pr-8"
+                  >
+                    <option value="daily">TODAY</option>
+                    <option value="weekly">LAST 7 DAYS</option>
+                    <option value="monthly">LAST 30 DAYS</option>
+                    <option value="yearly">LAST YEAR</option>
+                  </select>
+                  <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" size={12} />
+                </div>
                 <div className="relative flex-1 md:flex-none">
                   <select 
                     value={paymentMethodFilter}
                     onChange={(e) => setPaymentMethodFilter(e.target.value as any)}
-                    className="w-full bg-lethal-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] lethal-mono font-bold text-zinc-400 focus:text-white focus:border-lethal-orange outline-none appearance-none cursor-pointer transition-all uppercase"
+                    className="w-full bg-lethal-gray border border-zinc-800 rounded-2xl px-4 py-2 text-[10px] lethal-mono font-bold text-zinc-400 focus:text-white focus:border-lethal-orange outline-none appearance-none cursor-pointer transition-all uppercase pr-8"
                   >
                     <option value="ALL">ALL PAYMENTS</option>
                     <option value="Cash">CASH</option>
@@ -1463,7 +1744,7 @@ export default function App() {
             {/* Weekly Performance Chart */}
             <div className="bg-lethal-gray border border-zinc-800 p-6 rounded-3xl space-y-6">
               <div className="flex justify-between items-center">
-                <h3 className="lethal-mono text-xs font-bold text-lethal-orange tracking-widest uppercase">Weekly Performance</h3>
+                <h3 className="lethal-mono text-xs font-bold text-lethal-orange tracking-widest uppercase">Last 7 Days</h3>
                 <div className="flex gap-4">
                   <div className="flex items-center gap-2">
                     <div className="w-2 h-2 rounded-full bg-lethal-orange" />
