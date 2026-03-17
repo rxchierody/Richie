@@ -251,7 +251,7 @@ service cloud.firestore {
     // ===============================================================
 
     match /stores/{storeId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create, update: if isAdmin() && isValidStore(request.resource.data);
       allow delete: if isAdmin();
     }
@@ -268,34 +268,34 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create, update: if isAdmin() && isValidProduct(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /sales/{saleId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create: if isEmployee() && isValidSale(request.resource.data);
       allow update: if isAdmin() && isValidSale(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /expenses/{expenseId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create: if isEmployee() && isValidExpense(request.resource.data);
       allow update: if isAdmin() && isValidExpense(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /restocks/{restockId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create: if isAdmin() && isValidRestock(request.resource.data);
       allow update: if isAdmin() && isValidRestock(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /clients/{clientId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create: if isEmployee() && isValidClient(request.resource.data);
       allow update: if isEmployee() && isValidClient(request.resource.data) &&
                       request.resource.data.createdAt == resource.data.createdAt;
@@ -303,7 +303,7 @@ service cloud.firestore {
     }
 
     match /clientTransactions/{transactionId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create: if isEmployee() && isValidClientTransaction(request.resource.data);
       allow update: if isAdmin() && isValidClientTransaction(request.resource.data) &&
                       request.resource.data.clientId == resource.data.clientId;
@@ -311,13 +311,13 @@ service cloud.firestore {
     }
 
     match /alertRules/{ruleId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create, update: if isAdmin() && isValidAlertRule(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /triggeredAlerts/{alertId} {
-      allow read: if isEmployee();
+      allow read: if true;
       allow create: if isEmployee() && isValidTriggeredAlert(request.resource.data);
       allow update: if isEmployee() && isValidTriggeredAlert(request.resource.data) &&
                       request.resource.data.ruleId == resource.data.ruleId &&

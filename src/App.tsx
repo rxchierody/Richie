@@ -86,7 +86,8 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
   RecaptchaVerifier,
-  signInWithPhoneNumber
+  signInWithPhoneNumber,
+  updateProfile
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { 
@@ -105,7 +106,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security';
+type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 enum OperationType {
@@ -261,7 +262,8 @@ export default function App() {
   const [phoneNumber, setPhoneNumber] = useState('');
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
-  const [emailForm, setEmailForm] = useState({ email: '', password: '' });
+  const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
+  const [showAuthScreen, setShowAuthScreen] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
@@ -421,6 +423,15 @@ export default function App() {
     setDeferredPrompt(null);
   };
 
+  const requireAuth = (action: () => void) => {
+    if (!user) {
+      setAuthMode('signup');
+      setShowAuthScreen(true);
+      return;
+    }
+    action();
+  };
+
   const getDayStats = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
     const daySales = sales.filter(s => s.date === dateStr);
@@ -488,6 +499,9 @@ export default function App() {
         } catch (error) {
           handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
         }
+      } else {
+        setUserRole('employee');
+        setUserProfile(null);
       }
       setIsAuthReady(true);
     });
@@ -496,7 +510,7 @@ export default function App() {
 
   // Firestore Real-time Sync
   useEffect(() => {
-    if (!isAuthReady || !user) return;
+    if (!isAuthReady) return;
 
     const unsubStores = onSnapshot(collection(db, 'stores'), (snapshot) => {
       const storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
@@ -1292,8 +1306,24 @@ export default function App() {
       if (authMode === 'login') {
         await signInWithEmailAndPassword(auth, emailForm.email, emailForm.password);
       } else {
-        await createUserWithEmailAndPassword(auth, emailForm.email, emailForm.password);
+        if (!emailForm.username) {
+          setLoginError("USERNAME REQUIRED FOR REGISTRATION");
+          setIsLoggingIn(false);
+          return;
+        }
+        const userCredential = await createUserWithEmailAndPassword(auth, emailForm.email, emailForm.password);
+        // Set display name in profile
+        await updateProfile(userCredential.user, { displayName: emailForm.username });
+        // Also update Firestore profile
+        await setDoc(doc(db, 'users', userCredential.user.uid), {
+          id: userCredential.user.uid,
+          email: emailForm.email,
+          role: 'employee',
+          displayName: emailForm.username,
+          assignedStoreIds: []
+        });
       }
+      setShowAuthScreen(false);
     } catch (error: any) {
       console.error("Email auth failed:", error);
       if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
@@ -1364,6 +1394,7 @@ export default function App() {
     setLoginError(null);
     try {
       await confirmationResult.confirm(verificationCode);
+      setShowAuthScreen(false);
     } catch (error: any) {
       console.error("Verification failed:", error);
       setLoginError("INVALID VERIFICATION CODE");
@@ -1438,6 +1469,7 @@ export default function App() {
     try {
       await signOut(auth);
       setActiveTab('portfolio');
+      setShowAuthScreen(false);
     } catch (error) {
       console.error("Logout failed:", error);
     }
@@ -1454,7 +1486,7 @@ export default function App() {
     );
   }
 
-  if (!user) {
+  if (isAuthReady && !user && showAuthScreen) {
     return (
       <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-12 text-center">
@@ -1469,7 +1501,7 @@ export default function App() {
             </div>
             <div className="space-y-2">
               <h2 className="text-xl font-bold text-white">{authMode === 'login' ? 'Access Restricted' : 'Create Account'}</h2>
-              <p className="text-zinc-500 text-sm">Please authenticate to access the operational dashboard.</p>
+              <p className="text-zinc-500 text-sm">Please authenticate to perform this action.</p>
             </div>
 
             <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
@@ -1495,6 +1527,18 @@ export default function App() {
 
             {authMethod === 'email' ? (
               <form onSubmit={handleEmailAuth} className="space-y-4">
+                {authMode === 'signup' && (
+                  <div className="space-y-2 text-left">
+                    <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Username</label>
+                    <input 
+                      type="text" 
+                      placeholder="YOUR USERNAME" 
+                      value={emailForm.username}
+                      onChange={e => setEmailForm({ ...emailForm, username: e.target.value })}
+                      className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
+                    />
+                  </div>
+                )}
                 <div className="space-y-2 text-left">
                   <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Email Address</label>
                   <input 
@@ -1618,12 +1662,18 @@ export default function App() {
               CONTINUE WITH GOOGLE
             </button>
 
-            <div className="pt-2">
+            <div className="pt-2 flex flex-col gap-4">
               <button 
                 onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
                 className="text-[10px] rowina-mono text-rowina-blue uppercase tracking-widest hover:underline"
               >
                 {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Sign In"}
+              </button>
+              <button 
+                onClick={() => setShowAuthScreen(false)}
+                className="text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
+              >
+                Continue as Guest
               </button>
             </div>
           </div>
@@ -1636,7 +1686,7 @@ export default function App() {
     );
   }
 
-  if (isAppLocked && appLockConfig.type) {
+  if (isAppLocked && appLockConfig.type && user) {
     return (
       <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-12 text-center">
@@ -1764,7 +1814,7 @@ export default function App() {
             </div>
             <div className="relative">
               <button 
-                onClick={() => setActiveTab('alerts')}
+                onClick={() => requireAuth(() => setActiveTab('alerts'))}
                 className={cn(
                   "w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center transition-all",
                   triggeredAlerts.some(a => !a.isRead) ? "text-rowina-blue border-rowina-blue animate-pulse" : "text-zinc-500 hover:text-white hover:border-zinc-600"
@@ -1778,13 +1828,23 @@ export default function App() {
             </div>
             {appLockConfig.type && (
               <button 
-                onClick={() => setIsAppLocked(true)}
+                onClick={() => requireAuth(() => setIsAppLocked(true))}
                 className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-rowina-blue hover:border-rowina-blue transition-all"
                 title="Lock App"
               >
                 <Lock size={24} />
               </button>
             )}
+            <button 
+              onClick={() => setActiveTab('help')}
+              className={cn(
+                "w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center transition-all",
+                activeTab === 'help' ? "text-rowina-blue border-rowina-blue" : "text-zinc-500 hover:text-white hover:border-zinc-600"
+              )}
+              title="User Guide"
+            >
+              <HelpCircle size={24} />
+            </button>
             <button 
               onClick={handleLogout}
               className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-rowina-blue hover:border-rowina-blue transition-all"
@@ -1808,10 +1868,17 @@ export default function App() {
           { id: 'staff', label: 'STAFF' },
           { id: 'stores', label: 'STORES' },
           { id: 'security', label: 'SECURITY' },
+          { id: 'help', label: 'HELP' },
         ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores')).map((tab) => (
           <button
             key={tab.id}
-            onClick={() => setActiveTab(tab.id as Tab)}
+            onClick={() => {
+              if (['alerts', 'staff', 'stores', 'security'].includes(tab.id)) {
+                requireAuth(() => setActiveTab(tab.id as Tab));
+              } else {
+                setActiveTab(tab.id as Tab);
+              }
+            }}
             className={cn(
               "flex-shrink-0 py-2 rounded-xl text-[9px] sm:text-[10px] font-bold rowina-mono transition-all duration-300 whitespace-nowrap px-3 sm:px-4",
               activeTab === tab.id 
@@ -1974,8 +2041,8 @@ export default function App() {
               <div className="flex justify-between items-center">
                 <h3 className="rowina-mono text-xs font-bold text-zinc-500">RECENT LOGS</h3>
                 <div className="flex gap-2">
-                  <button onClick={() => setIsSaleModalOpen(true)} className="text-[10px] rowina-mono text-rowina-blue border border-rowina-blue/30 px-3 py-1 rounded-full hover:bg-rowina-blue/10 transition-all">ADD SALE</button>
-                  <button onClick={() => setIsExpenseModalOpen(true)} className="text-[10px] rowina-mono text-zinc-500 border border-zinc-800 px-3 py-1 rounded-full hover:bg-white/5 transition-all">ADD EXPENSE</button>
+                  <button onClick={() => requireAuth(() => setIsSaleModalOpen(true))} className="text-[10px] rowina-mono text-rowina-blue border border-rowina-blue/30 px-3 py-1 rounded-full hover:bg-rowina-blue/10 transition-all">ADD SALE</button>
+                  <button onClick={() => requireAuth(() => setIsExpenseModalOpen(true))} className="text-[10px] rowina-mono text-zinc-500 border border-zinc-800 px-3 py-1 rounded-full hover:bg-white/5 transition-all">ADD EXPENSE</button>
                 </div>
               </div>
               
@@ -2057,17 +2124,17 @@ export default function App() {
                   <h2 className="text-2xl font-bold rowina-title">Stock Store</h2>
                   <div className="flex items-center gap-3">
                     <button 
-                      onClick={() => {
+                      onClick={() => requireAuth(() => {
                         setRestockForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: 0, unitCost: 0 });
                         setModalSearch('');
                         setIsRestockModalOpen(true);
-                      }}
+                      })}
                       className="text-[10px] rowina-mono text-emerald-500 border border-emerald-500/30 px-4 py-2 rounded-full hover:bg-emerald-500/10 transition-all flex items-center gap-2"
                     >
                       <Package size={14} /> RESTOCK
                     </button>
                     <button 
-                      onClick={() => setIsProductModalOpen(true)}
+                      onClick={() => requireAuth(() => setIsProductModalOpen(true))}
                       className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
                     >
                       <Plus size={20} />
@@ -2120,8 +2187,8 @@ export default function App() {
                               <p className="text-rowina-blue font-bold">{f(product.sellingPrice)}</p>
                             </div>
                             <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={(e) => { e.stopPropagation(); setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); }} className="text-zinc-500 hover:text-white"><Edit3 size={14} /></button>
-                              <button onClick={(e) => { e.stopPropagation(); handleDeleteProduct(product.id); }} className="text-zinc-500 hover:text-rose-500"><Trash2 size={14} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); requireAuth(() => { setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); }); }} className="text-zinc-500 hover:text-white"><Edit3 size={14} /></button>
+                              <button onClick={(e) => { e.stopPropagation(); requireAuth(() => handleDeleteProduct(product.id)); }} className="text-zinc-500 hover:text-rose-500"><Trash2 size={14} /></button>
                             </div>
                           </div>
                         </div>
@@ -2450,11 +2517,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Client Ledger</h2>
               <button 
-                onClick={() => {
+                onClick={() => requireAuth(() => {
                   setEditingClient(null);
                   setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
                   setIsClientModalOpen(true);
-                }}
+                })}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -2497,24 +2564,24 @@ export default function App() {
                     
                     <div className="flex gap-3 mb-6">
                       <button 
-                        onClick={() => { setSelectedClient(client); setIsClientTransactionModalOpen(true); }}
+                        onClick={() => requireAuth(() => { setSelectedClient(client); setIsClientTransactionModalOpen(true); })}
                         className="flex-1 bg-zinc-800 hover:bg-zinc-700 text-white py-3 rounded-xl text-[10px] font-bold rowina-mono tracking-widest transition-all flex items-center justify-center gap-2"
                       >
                         <CreditCard size={14} /> ADJUST BALANCE
                       </button>
                       <button 
-                        onClick={() => {
+                        onClick={() => requireAuth(() => {
                           setEditingClient(client);
                           setClientForm({ name: client.name, phone: client.phone, email: client.email, totalDebt: client.totalDebt });
                           setIsClientModalOpen(true);
-                        }}
+                        })}
                         className="w-12 bg-zinc-800 hover:bg-rowina-blue/20 hover:text-rowina-blue text-zinc-500 rounded-xl flex items-center justify-center transition-all"
                         title="Edit Client"
                       >
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => handleDeleteClient(client.id)}
+                        onClick={() => requireAuth(() => handleDeleteClient(client.id))}
                         className="w-12 bg-zinc-800 hover:bg-rose-500/20 hover:text-rose-500 text-zinc-500 rounded-xl flex items-center justify-center transition-all"
                         title="Delete Client"
                       >
@@ -2567,7 +2634,7 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Intelligence Reports</h2>
               <button 
-                onClick={exportToPDF}
+                onClick={() => requireAuth(exportToPDF)}
                 className="flex items-center gap-2 bg-rowina-blue text-black px-6 py-3 rounded-full font-bold rowina-mono text-[10px] tracking-widest hover:scale-105 transition-transform"
               >
                 <Download size={16} /> EXPORT PDF
@@ -3022,6 +3089,119 @@ export default function App() {
                   </div>
                 </div>
               ))}
+            </div>
+          </motion.div>
+        )}
+        {activeTab === 'help' && (
+          <motion.div
+            key="help"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            <div className="space-y-2">
+              <h2 className="text-2xl font-bold rowina-title">User Intelligence Guide</h2>
+              <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Operational Manual & Tutorials</p>
+            </div>
+
+            <div className="grid grid-cols-1 gap-6">
+              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-6">
+                <div className="flex items-center gap-4 text-rowina-blue">
+                  <TrendingUp size={32} />
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tight">Portfolio & Analytics</h3>
+                </div>
+                <div className="space-y-4 text-sm text-zinc-400 leading-relaxed">
+                  <p>
+                    The <span className="text-white font-bold">Portfolio</span> tab provides a high-level overview of your business performance. 
+                    Track revenue, expenses, and net profit in real-time.
+                  </p>
+                  <ul className="list-disc list-inside space-y-2 ml-2">
+                    <li><span className="text-zinc-200">Time Periods:</span> Switch between Daily, Weekly, Monthly, and Yearly views.</li>
+                    <li><span className="text-zinc-200">Trends:</span> Monitor percentage changes compared to previous periods.</li>
+                    <li><span className="text-zinc-200">Visualizations:</span> Analyze sales vs. expenses charts to identify patterns.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-6">
+                <div className="flex items-center gap-4 text-emerald-500">
+                  <ShoppingCart size={32} />
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tight">Store Management</h3>
+                </div>
+                <div className="space-y-4 text-sm text-zinc-400 leading-relaxed">
+                  <p>
+                    Manage your inventory and record sales in the <span className="text-white font-bold">Store</span> tab.
+                  </p>
+                  <ul className="list-disc list-inside space-y-2 ml-2">
+                    <li><span className="text-zinc-200">Inventory:</span> Add products with buying/selling prices and stock levels.</li>
+                    <li><span className="text-zinc-200">Record Sales:</span> Quickly log sales. Stock levels update automatically.</li>
+                    <li><span className="text-zinc-200">Restocking:</span> Log restock entries to maintain accurate inventory counts.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-6">
+                <div className="flex items-center gap-4 text-amber-500">
+                  <Users size={32} />
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tight">Client Ledger</h3>
+                </div>
+                <div className="space-y-4 text-sm text-zinc-400 leading-relaxed">
+                  <p>
+                    Track client debts and payments in the <span className="text-white font-bold">Clients</span> tab.
+                  </p>
+                  <ul className="list-disc list-inside space-y-2 ml-2">
+                    <li><span className="text-zinc-200">Debt Tracking:</span> Record credits (debts) and payments for each client.</li>
+                    <li><span className="text-zinc-200">History:</span> View a detailed ledger of all transactions per client.</li>
+                    <li><span className="text-zinc-200">Search:</span> Quickly find clients by name or phone number.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-6">
+                <div className="flex items-center gap-4 text-rose-500">
+                  <Bell size={32} />
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tight">Alert Command</h3>
+                </div>
+                <div className="space-y-4 text-sm text-zinc-400 leading-relaxed">
+                  <p>
+                    Set up automated surveillance rules in the <span className="text-white font-bold">Alerts</span> tab (Executive only).
+                  </p>
+                  <ul className="list-disc list-inside space-y-2 ml-2">
+                    <li><span className="text-zinc-200">Low Stock:</span> Get notified when a product falls below a certain quantity.</li>
+                    <li><span className="text-zinc-200">Sales Targets:</span> Celebrate when you reach specific revenue milestones.</li>
+                    <li><span className="text-zinc-200">Profit Margins:</span> Monitor if your margins drop below your goals.</li>
+                  </ul>
+                </div>
+              </div>
+
+              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-6">
+                <div className="flex items-center gap-4 text-indigo-500">
+                  <Shield size={32} />
+                  <h3 className="text-xl font-bold text-white uppercase tracking-tight">Security & Access</h3>
+                </div>
+                <div className="space-y-4 text-sm text-zinc-400 leading-relaxed">
+                  <p>
+                    Protect your data and manage your team.
+                  </p>
+                  <ul className="list-disc list-inside space-y-2 ml-2">
+                    <li><span className="text-zinc-200">App Lock:</span> Set a local PIN or password in the <span className="text-white font-bold">Security</span> tab.</li>
+                    <li><span className="text-zinc-200">Staff Roles:</span> Assign 'Employee' or 'Executive' roles to control access.</li>
+                    <li><span className="text-zinc-200">Multi-Store:</span> Executives can manage multiple store locations independently.</li>
+                  </ul>
+                </div>
+              </div>
+            </div>
+
+            <div className="bg-rowina-blue/10 border border-rowina-blue/20 p-8 rounded-[40px] text-center space-y-4">
+              <HelpCircle className="mx-auto text-rowina-blue" size={48} />
+              <h3 className="text-white font-bold text-lg uppercase tracking-widest">Need Advanced Support?</h3>
+              <p className="text-zinc-400 text-sm max-w-xs mx-auto">
+                For technical issues or custom feature requests, contact your system administrator.
+              </p>
+              <div className="pt-4">
+                <p className="rowina-mono text-[10px] text-zinc-600 uppercase tracking-[0.2em]">Rowina Sales Tracker • Version 1.0.0</p>
+              </div>
             </div>
           </motion.div>
         )}
