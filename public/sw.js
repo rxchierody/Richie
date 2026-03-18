@@ -1,4 +1,4 @@
-const CACHE_NAME = 'rowina-sales-v1';
+const CACHE_NAME = 'lethal-finance-v1';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',

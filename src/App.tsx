@@ -31,6 +31,7 @@ import {
   Bell,
   AlertTriangle,
   CheckCircle,
+  Check,
   Activity,
   Users,
   CreditCard,
@@ -75,7 +76,7 @@ import {
   isToday,
   isValid
 } from 'date-fns';
-import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile } from './types';
+import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile, Subscription } from './types';
 import { cn, formatCurrency, calculateMarkup, calculateMargin, round, EAST_AFRICAN_CURRENCIES } from './lib/utils';
 import { auth, db } from './firebase';
 import { 
@@ -107,101 +108,235 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help';
+type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help' | 'subscriptions';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 const COUNTRY_CODES = [
-  { code: '+254', name: 'Kenya', flag: '🇰🇪' },
-  { code: '+255', name: 'Tanzania', flag: '🇹🇿' },
-  { code: '+256', name: 'Uganda', flag: '🇺🇬' },
-  { code: '+250', name: 'Rwanda', flag: '🇷🇼' },
-  { code: '+257', name: 'Burundi', flag: '🇧🇮' },
-  { code: '+211', name: 'South Sudan', flag: '🇸🇸' },
-  { code: '+251', name: 'Ethiopia', flag: '🇪🇹' },
-  { code: '+252', name: 'Somalia', flag: '🇸🇴' },
-  { code: '+243', name: 'DR Congo', flag: '🇨🇩' },
-  { code: '+234', name: 'Nigeria', flag: '🇳🇬' },
-  { code: '+233', name: 'Ghana', flag: '🇬🇭' },
-  { code: '+27', name: 'South Africa', flag: '🇿🇦' },
-  { code: '+1', name: 'USA/Canada', flag: '🇺🇸' },
-  { code: '+44', name: 'UK', flag: '🇬🇧' },
-  { code: '+91', name: 'India', flag: '🇮🇳' },
-  { code: '+86', name: 'China', flag: '🇨🇳' },
-  { code: '+971', name: 'UAE', flag: '🇦🇪' },
-  { code: '+20', name: 'Egypt', flag: '🇪🇬' },
-  { code: '+33', name: 'France', flag: '🇫🇷' },
-  { code: '+49', name: 'Germany', flag: '🇩🇪' },
-  { code: '+81', name: 'Japan', flag: '🇯🇵' },
+  { code: '+93', name: 'Afghanistan', flag: '🇦🇫' },
+  { code: '+355', name: 'Albania', flag: '🇦🇱' },
+  { code: '+213', name: 'Algeria', flag: '🇩🇿' },
+  { code: '+376', name: 'Andorra', flag: '🇦🇩' },
+  { code: '+244', name: 'Angola', flag: '🇦🇴' },
+  { code: '+1-264', name: 'Anguilla', flag: '🇦🇮' },
+  { code: '+1-268', name: 'Antigua and Barbuda', flag: '🇦🇬' },
+  { code: '+54', name: 'Argentina', flag: '🇦🇷' },
+  { code: '+374', name: 'Armenia', flag: '🇦🇲' },
+  { code: '+297', name: 'Aruba', flag: '🇦🇼' },
   { code: '+61', name: 'Australia', flag: '🇦🇺' },
-  { code: '+55', name: 'Brazil', flag: '🇧🇷' },
-  { code: '+7', name: 'Russia', flag: '🇷🇺' },
-  { code: '+39', name: 'Italy', flag: '🇮🇹' },
-  { code: '+34', name: 'Spain', flag: '🇪🇸' },
-  { code: '+52', name: 'Mexico', flag: '🇲🇽' },
-  { code: '+82', name: 'South Korea', flag: '🇰🇷' },
-  { code: '+62', name: 'Indonesia', flag: '🇮🇩' },
-  { code: '+90', name: 'Turkey', flag: '🇹🇷' },
-  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦' },
-  { code: '+41', name: 'Switzerland', flag: '🇨🇭' },
-  { code: '+46', name: 'Sweden', flag: '🇸🇪' },
-  { code: '+47', name: 'Norway', flag: '🇳🇴' },
-  { code: '+45', name: 'Denmark', flag: '🇩🇰' },
-  { code: '+31', name: 'Netherlands', flag: '🇳🇱' },
-  { code: '+32', name: 'Belgium', flag: '🇧🇪' },
   { code: '+43', name: 'Austria', flag: '🇦🇹' },
-  { code: '+351', name: 'Portugal', flag: '🇵🇹' },
-  { code: '+30', name: 'Greece', flag: '🇬🇷' },
-  { code: '+353', name: 'Ireland', flag: '🇮🇪' },
-  { code: '+64', name: 'New Zealand', flag: '🇳🇿' },
-  { code: '+65', name: 'Singapore', flag: '🇸🇬' },
-  { code: '+60', name: 'Malaysia', flag: '🇲🇾' },
-  { code: '+66', name: 'Thailand', flag: '🇹🇭' },
-  { code: '+84', name: 'Vietnam', flag: '🇻🇳' },
-  { code: '+63', name: 'Philippines', flag: '🇵🇭' },
-  { code: '+92', name: 'Pakistan', flag: '🇵🇰' },
+  { code: '+994', name: 'Azerbaijan', flag: '🇦🇿' },
+  { code: '+1-242', name: 'Bahamas', flag: '🇧🇸' },
+  { code: '+973', name: 'Bahrain', flag: '🇧🇭' },
   { code: '+880', name: 'Bangladesh', flag: '🇧🇩' },
-  { code: '+94', name: 'Sri Lanka', flag: '🇱🇰' },
-  { code: '+972', name: 'Israel', flag: '🇮🇱' },
+  { code: '+1-246', name: 'Barbados', flag: '🇧🇧' },
+  { code: '+375', name: 'Belarus', flag: '🇧🇾' },
+  { code: '+32', name: 'Belgium', flag: '🇧🇪' },
+  { code: '+501', name: 'Belize', flag: '🇧🇿' },
+  { code: '+229', name: 'Benin', flag: '🇧🇯' },
+  { code: '+1-441', name: 'Bermuda', flag: '🇧🇲' },
+  { code: '+975', name: 'Bhutan', flag: '🇧🇹' },
+  { code: '+591', name: 'Bolivia', flag: '🇧🇴' },
+  { code: '+387', name: 'Bosnia and Herzegovina', flag: '🇧🇦' },
+  { code: '+267', name: 'Botswana', flag: '🇧🇼' },
+  { code: '+55', name: 'Brazil', flag: '🇧🇷' },
+  { code: '+1-284', name: 'British Virgin Islands', flag: '🇻🇬' },
+  { code: '+673', name: 'Brunei', flag: '🇧🇳' },
+  { code: '+359', name: 'Bulgaria', flag: '🇧🇬' },
+  { code: '+226', name: 'Burkina Faso', flag: '🇧🇫' },
+  { code: '+257', name: 'Burundi', flag: '🇧🇮' },
+  { code: '+855', name: 'Cambodia', flag: '🇰🇭' },
+  { code: '+237', name: 'Cameroon', flag: '🇨🇲' },
+  { code: '+1', name: 'Canada', flag: '🇨🇦' },
+  { code: '+238', name: 'Cape Verde', flag: '🇨🇻' },
+  { code: '+1-345', name: 'Cayman Islands', flag: '🇰🇾' },
+  { code: '+236', name: 'Central African Republic', flag: '🇨🇫' },
+  { code: '+235', name: 'Chad', flag: '🇹🇩' },
+  { code: '+56', name: 'Chile', flag: '🇨🇱' },
+  { code: '+86', name: 'China', flag: '🇨🇳' },
+  { code: '+57', name: 'Colombia', flag: '🇨🇴' },
+  { code: '+269', name: 'Comoros', flag: '🇰🇲' },
+  { code: '+242', name: 'Congo', flag: '🇨🇬' },
+  { code: '+682', name: 'Cook Islands', flag: '🇨🇰' },
+  { code: '+506', name: 'Costa Rica', flag: '🇨🇷' },
+  { code: '+385', name: 'Croatia', flag: '🇭🇷' },
+  { code: '+53', name: 'Cuba', flag: '🇨🇺' },
+  { code: '+357', name: 'Cyprus', flag: '🇨🇾' },
+  { code: '+420', name: 'Czech Republic', flag: '🇨🇿' },
+  { code: '+243', name: 'DR Congo', flag: '🇨🇩' },
+  { code: '+45', name: 'Denmark', flag: '🇩🇰' },
+  { code: '+253', name: 'Djibouti', flag: '🇩🇯' },
+  { code: '+1-767', name: 'Dominica', flag: '🇩🇲' },
+  { code: '+1-809', name: 'Dominican Republic', flag: '🇩🇴' },
+  { code: '+593', name: 'Ecuador', flag: '🇪🇨' },
+  { code: '+20', name: 'Egypt', flag: '🇪🇬' },
+  { code: '+503', name: 'El Salvador', flag: '🇸🇻' },
+  { code: '+240', name: 'Equatorial Guinea', flag: '🇬🇶' },
+  { code: '+291', name: 'Eritrea', flag: '🇪🇷' },
+  { code: '+372', name: 'Estonia', flag: '🇪🇪' },
+  { code: '+268', name: 'Eswatini', flag: '🇸🇿' },
+  { code: '+251', name: 'Ethiopia', flag: '🇪🇹' },
+  { code: '+500', name: 'Falkland Islands', flag: '🇫🇰' },
+  { code: '+298', name: 'Faroe Islands', flag: '🇫🇴' },
+  { code: '+679', name: 'Fiji', flag: '🇫🇯' },
+  { code: '+358', name: 'Finland', flag: '🇫🇮' },
+  { code: '+33', name: 'France', flag: '🇫🇷' },
+  { code: '+594', name: 'French Guiana', flag: '🇬🇫' },
+  { code: '+689', name: 'French Polynesia', flag: '🇵🇫' },
+  { code: '+241', name: 'Gabon', flag: '🇬🇦' },
+  { code: '+220', name: 'Gambia', flag: '🇬🇲' },
+  { code: '+995', name: 'Georgia', flag: '🇬🇪' },
+  { code: '+49', name: 'Germany', flag: '🇩🇪' },
+  { code: '+233', name: 'Ghana', flag: '🇬🇭' },
+  { code: '+350', name: 'Gibraltar', flag: '🇬🇮' },
+  { code: '+30', name: 'Greece', flag: '🇬🇷' },
+  { code: '+299', name: 'Greenland', flag: '🇬🇱' },
+  { code: '+1-473', name: 'Grenada', flag: '🇬🇩' },
+  { code: '+590', name: 'Guadeloupe', flag: '🇬🇵' },
+  { code: '+1-671', name: 'Guam', flag: '🇬🇺' },
+  { code: '+502', name: 'Guatemala', flag: '🇬🇹' },
+  { code: '+224', name: 'Guinea', flag: '🇬🇳' },
+  { code: '+245', name: 'Guinea-Bissau', flag: '🇬🇼' },
+  { code: '+592', name: 'Guyana', flag: '🇬🇾' },
+  { code: '+509', name: 'Haiti', flag: '🇭🇹' },
+  { code: '+504', name: 'Honduras', flag: '🇭🇳' },
+  { code: '+852', name: 'Hong Kong', flag: '🇭🇰' },
+  { code: '+36', name: 'Hungary', flag: '🇭🇺' },
+  { code: '+354', name: 'Iceland', flag: '🇮🇸' },
+  { code: '+91', name: 'India', flag: '🇮🇳' },
+  { code: '+62', name: 'Indonesia', flag: '🇮🇩' },
   { code: '+98', name: 'Iran', flag: '🇮🇷' },
   { code: '+964', name: 'Iraq', flag: '🇮🇶' },
-  { code: '+965', name: 'Kuwait', flag: '🇰🇼' },
-  { code: '+968', name: 'Oman', flag: '🇴🇲' },
-  { code: '+974', name: 'Qatar', flag: '🇶🇦' },
+  { code: '+353', name: 'Ireland', flag: '🇮🇪' },
+  { code: '+972', name: 'Israel', flag: '🇮🇱' },
+  { code: '+39', name: 'Italy', flag: '🇮🇹' },
+  { code: '+1-876', name: 'Jamaica', flag: '🇯🇲' },
+  { code: '+81', name: 'Japan', flag: '🇯🇵' },
   { code: '+962', name: 'Jordan', flag: '🇯🇴' },
+  { code: '+7', name: 'Kazakhstan', flag: '🇰🇿' },
+  { code: '+254', name: 'Kenya', flag: '🇰🇪' },
+  { code: '+686', name: 'Kiribati', flag: '🇰🇮' },
+  { code: '+965', name: 'Kuwait', flag: '🇰🇼' },
+  { code: '+996', name: 'Kyrgyzstan', flag: '🇰🇬' },
+  { code: '+856', name: 'Laos', flag: '🇱🇦' },
+  { code: '+371', name: 'Latvia', flag: '🇱🇻' },
   { code: '+961', name: 'Lebanon', flag: '🇱🇧' },
-  { code: '+963', name: 'Syria', flag: '🇸🇾' },
-  { code: '+967', name: 'Yemen', flag: '🇾🇪' },
-  { code: '+212', name: 'Morocco', flag: '🇲🇦' },
-  { code: '+213', name: 'Algeria', flag: '🇩🇿' },
-  { code: '+216', name: 'Tunisia', flag: '🇹🇳' },
+  { code: '+266', name: 'Lesotho', flag: '🇱🇸' },
+  { code: '+231', name: 'Liberia', flag: '🇱🇷' },
   { code: '+218', name: 'Libya', flag: '🇱🇾' },
-  { code: '+249', name: 'Sudan', flag: '🇸🇩' },
-  { code: '+221', name: 'Senegal', flag: '🇸🇳' },
-  { code: '+225', name: 'Ivory Coast', flag: '🇨🇮' },
-  { code: '+237', name: 'Cameroon', flag: '🇨🇲' },
+  { code: '+423', name: 'Liechtenstein', flag: '🇱🇮' },
+  { code: '+370', name: 'Lithuania', flag: '🇱🇹' },
+  { code: '+352', name: 'Luxembourg', flag: '🇱🇺' },
+  { code: '+853', name: 'Macau', flag: '🇲🇴' },
+  { code: '+389', name: 'Macedonia', flag: '🇲🇰' },
+  { code: '+261', name: 'Madagascar', flag: '🇲🇬' },
+  { code: '+265', name: 'Malawi', flag: '🇲🇼' },
+  { code: '+60', name: 'Malaysia', flag: '🇲🇾' },
+  { code: '+960', name: 'Maldives', flag: '🇲🇻' },
+  { code: '+223', name: 'Mali', flag: '🇲🇱' },
+  { code: '+356', name: 'Malta', flag: '🇲🇹' },
+  { code: '+692', name: 'Marshall Islands', flag: '🇲🇭' },
+  { code: '+596', name: 'Martinique', flag: '🇲🇶' },
+  { code: '+222', name: 'Mauritania', flag: '🇲🇷' },
+  { code: '+230', name: 'Mauritius', flag: '🇲🇺' },
+  { code: '+262', name: 'Mayotte', flag: '🇾🇹' },
+  { code: '+52', name: 'Mexico', flag: '🇲🇽' },
+  { code: '+691', name: 'Micronesia', flag: '🇫🇲' },
+  { code: '+373', name: 'Moldova', flag: '🇲🇩' },
+  { code: '+377', name: 'Monaco', flag: '🇲🇨' },
+  { code: '+976', name: 'Mongolia', flag: '🇲🇳' },
+  { code: '+382', name: 'Montenegro', flag: '🇲🇪' },
+  { code: '+1-664', name: 'Montserrat', flag: '🇲🇸' },
+  { code: '+212', name: 'Morocco', flag: '🇲🇦' },
   { code: '+258', name: 'Mozambique', flag: '🇲🇿' },
+  { code: '+95', name: 'Myanmar', flag: '🇲🇲' },
+  { code: '+264', name: 'Namibia', flag: '🇳🇦' },
+  { code: '+674', name: 'Nauru', flag: '🇳🇷' },
+  { code: '+977', name: 'Nepal', flag: '🇳🇵' },
+  { code: '+31', name: 'Netherlands', flag: '🇳🇱' },
+  { code: '+687', name: 'New Caledonia', flag: '🇳🇨' },
+  { code: '+64', name: 'New Zealand', flag: '🇳🇿' },
+  { code: '+505', name: 'Nicaragua', flag: '🇳🇮' },
+  { code: '+227', name: 'Niger', flag: '🇳🇪' },
+  { code: '+234', name: 'Nigeria', flag: '🇳🇬' },
+  { code: '+683', name: 'Niue', flag: '🇳🇺' },
+  { code: '+672', name: 'Norfolk Island', flag: '🇳🇫' },
+  { code: '+850', name: 'North Korea', flag: '🇰🇵' },
+  { code: '+1-670', name: 'Northern Mariana Islands', flag: '🇲🇵' },
+  { code: '+47', name: 'Norway', flag: '🇳🇴' },
+  { code: '+968', name: 'Oman', flag: '🇴🇲' },
+  { code: '+92', name: 'Pakistan', flag: '🇵🇰' },
+  { code: '+680', name: 'Palau', flag: '🇵🇼' },
+  { code: '+970', name: 'Palestine', flag: '🇵🇸' },
+  { code: '+507', name: 'Panama', flag: '🇵🇦' },
+  { code: '+675', name: 'Papua New Guinea', flag: '🇵🇬' },
+  { code: '+595', name: 'Paraguay', flag: '🇵🇾' },
+  { code: '+51', name: 'Peru', flag: '🇵🇪' },
+  { code: '+63', name: 'Philippines', flag: '🇵🇭' },
+  { code: '+48', name: 'Poland', flag: '🇵🇱' },
+  { code: '+351', name: 'Portugal', flag: '🇵🇹' },
+  { code: '+1-787', name: 'Puerto Rico', flag: '🇵🇷' },
+  { code: '+974', name: 'Qatar', flag: '🇶🇦' },
+  { code: '+262', name: 'Reunion', flag: '🇷🇪' },
+  { code: '+40', name: 'Romania', flag: '🇷🇴' },
+  { code: '+7', name: 'Russia', flag: '🇷🇺' },
+  { code: '+250', name: 'Rwanda', flag: '🇷🇼' },
+  { code: '+685', name: 'Samoa', flag: '🇼🇸' },
+  { code: '+378', name: 'San Marino', flag: '🇸🇲' },
+  { code: '+239', name: 'Sao Tome and Principe', flag: '🇸🇹' },
+  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦' },
+  { code: '+221', name: 'Senegal', flag: '🇸🇳' },
+  { code: '+381', name: 'Serbia', flag: '🇷🇸' },
+  { code: '+248', name: 'Seychelles', flag: '🇸🇨' },
+  { code: '+232', name: 'Sierra Leone', flag: '🇸🇱' },
+  { code: '+65', name: 'Singapore', flag: '🇸🇬' },
+  { code: '+421', name: 'Slovakia', flag: '🇸🇰' },
+  { code: '+386', name: 'Slovenia', flag: '🇸🇮' },
+  { code: '+677', name: 'Solomon Islands', flag: '🇸🇧' },
+  { code: '+252', name: 'Somalia', flag: '🇸🇴' },
+  { code: '+27', name: 'South Africa', flag: '🇿🇦' },
+  { code: '+82', name: 'South Korea', flag: '🇰🇷' },
+  { code: '+211', name: 'South Sudan', flag: '🇸🇸' },
+  { code: '+34', name: 'Spain', flag: '🇪🇸' },
+  { code: '+94', name: 'Sri Lanka', flag: '🇱🇰' },
+  { code: '+1-869', name: 'St. Kitts and Nevis', flag: '🇰🇳' },
+  { code: '+1-758', name: 'St. Lucia', flag: '🇱🇨' },
+  { code: '+508', name: 'St. Pierre and Miquelon', flag: '🇵🇲' },
+  { code: '+1-784', name: 'St. Vincent and the Grenadines', flag: '🇻🇨' },
+  { code: '+249', name: 'Sudan', flag: '🇸🇩' },
+  { code: '+597', name: 'Suriname', flag: '🇸🇷' },
+  { code: '+46', name: 'Sweden', flag: '🇸🇪' },
+  { code: '+41', name: 'Switzerland', flag: '🇨🇭' },
+  { code: '+963', name: 'Syria', flag: '🇸🇾' },
+  { code: '+886', name: 'Taiwan', flag: '🇹🇼' },
+  { code: '+992', name: 'Tajikistan', flag: '🇹🇯' },
+  { code: '+255', name: 'Tanzania', flag: '🇹🇿' },
+  { code: '+66', name: 'Thailand', flag: '🇹🇭' },
+  { code: '+228', name: 'Togo', flag: '🇹🇬' },
+  { code: '+690', name: 'Tokelau', flag: '🇹🇰' },
+  { code: '+676', name: 'Tonga', flag: '🇹🇴' },
+  { code: '+1-868', name: 'Trinidad and Tobago', flag: '🇹🇹' },
+  { code: '+216', name: 'Tunisia', flag: '🇹🇳' },
+  { code: '+90', name: 'Turkey', flag: '🇹🇷' },
+  { code: '+993', name: 'Turkmenistan', flag: '🇹🇲' },
+  { code: '+1-649', name: 'Turks and Caicos Islands', flag: '🇹🇨' },
+  { code: '+688', name: 'Tuvalu', flag: '🇹🇻' },
+  { code: '+256', name: 'Uganda', flag: '🇺🇬' },
+  { code: '+380', name: 'Ukraine', flag: '🇺🇦' },
+  { code: '+971', name: 'UAE', flag: '🇦🇪' },
+  { code: '+44', name: 'UK', flag: '🇬🇧' },
+  { code: '+1', name: 'USA', flag: '🇺🇸' },
+  { code: '+598', name: 'Uruguay', flag: '🇺🇾' },
+  { code: '+998', name: 'Uzbekistan', flag: '🇺🇿' },
+  { code: '+678', name: 'Vanuatu', flag: '🇻🇺' },
+  { code: '+379', name: 'Vatican City', flag: '🇻🇦' },
+  { code: '+58', name: 'Venezuela', flag: '🇻🇪' },
+  { code: '+84', name: 'Vietnam', flag: '🇻🇳' },
+  { code: '+1-284', name: 'Virgin Islands, British', flag: '🇻🇬' },
+  { code: '+1-340', name: 'Virgin Islands, U.S.', flag: '🇻🇮' },
+  { code: '+681', name: 'Wallis and Futuna', flag: '🇼🇫' },
+  { code: '+967', name: 'Yemen', flag: '🇾🇪' },
   { code: '+260', name: 'Zambia', flag: '🇿🇲' },
   { code: '+263', name: 'Zimbabwe', flag: '🇿🇼' },
-  { code: '+264', name: 'Namibia', flag: '🇳🇦' },
-  { code: '+267', name: 'Botswana', flag: '🇧🇼' },
-  { code: '+230', name: 'Mauritius', flag: '🇲🇺' },
-  { code: '+248', name: 'Seychelles', flag: '🇸🇨' },
-  { code: '+262', name: 'Reunion', flag: '🇷🇪' },
-  { code: '+261', name: 'Madagascar', flag: '🇲🇬' },
-  { code: '+241', name: 'Gabon', flag: '🇬🇦' },
-  { code: '+242', name: 'Congo', flag: '🇨🇬' },
-  { code: '+220', name: 'Gambia', flag: '🇬🇲' },
-  { code: '+231', name: 'Liberia', flag: '🇱🇷' },
-  { code: '+232', name: 'Sierra Leone', flag: '🇸🇱' },
-  { code: '+224', name: 'Guinea', flag: '🇬🇳' },
-  { code: '+223', name: 'Mali', flag: '🇲🇱' },
-  { code: '+227', name: 'Niger', flag: '🇳🇪' },
-  { code: '+226', name: 'Burkina Faso', flag: '🇧🇫' },
-  { code: '+228', name: 'Togo', flag: '🇹🇬' },
-  { code: '+229', name: 'Benin', flag: '🇧🇯' },
-  { code: '+235', name: 'Chad', flag: '🇹🇩' },
-  { code: '+236', name: 'Central African Republic', flag: '🇨🇫' },
-  { code: '+240', name: 'Equatorial Guinea', flag: '🇬🇶' },
   { code: '+253', name: 'Djibouti', flag: '🇩🇯' },
   { code: '+291', name: 'Eritrea', flag: '🇪🇷' },
   { code: '+265', name: 'Malawi', flag: '🇲🇼' },
@@ -275,8 +410,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
       }
 
       return (
-        <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-rowina-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
+        <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-lethal-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
             <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto text-rose-500">
               <AlertTriangle size={32} />
             </div>
@@ -286,7 +421,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
             </div>
             <button 
               onClick={() => window.location.reload()}
-              className="w-full bg-rowina-blue text-black py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+              className="w-full bg-lethal-blue text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
             >
               REBOOT SYSTEM
             </button>
@@ -300,8 +435,16 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errorMessage = error instanceof Error ? error.message : String(error);
+  
+  // If user is not logged in and it's a permission error, it's likely a race condition or logout
+  if (errorMessage.includes('Missing or insufficient permissions') && !auth.currentUser) {
+    console.warn(`Firestore Permission Error (Logged Out): ${operationType} on ${path}`);
+    return;
+  }
+
   const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
+    error: errorMessage,
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -339,8 +482,8 @@ const StatCard = ({
   const isGood = inverse ? !isPositive : isPositive;
   
   return (
-    <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
-      <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
+    <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+      <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
       <div className="mt-2">
         <p className={cn(
           "text-3xl sm:text-4xl font-bold tracking-tight",
@@ -348,7 +491,7 @@ const StatCard = ({
         )}>{value}</p>
       </div>
       <div className={cn(
-        "absolute bottom-5 right-6 flex items-center gap-1 rowina-mono text-[10px] font-bold",
+        "absolute bottom-5 right-6 flex items-center gap-1 lethal-mono text-[10px] font-bold",
         isGood ? "text-emerald-500" : "text-rose-500"
       )}>
         {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -377,18 +520,18 @@ export default function App() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('rowina_currency') || 'USD');
+  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('lethal_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
 
   const [appLockConfig, setAppLockConfig] = useState<{
     type: 'pin' | 'password' | null;
     value: string | null;
   }>(() => {
-    const saved = localStorage.getItem('rowina_lock_config');
+    const saved = localStorage.getItem('lethal_lock_config');
     return saved ? JSON.parse(saved) : { type: null, value: null };
   });
   const [isAppLocked, setIsAppLocked] = useState(() => {
-    const saved = localStorage.getItem('rowina_lock_config');
+    const saved = localStorage.getItem('lethal_lock_config');
     const config = saved ? JSON.parse(saved) : { type: null, value: null };
     return !!config.type;
   });
@@ -396,11 +539,11 @@ export default function App() {
   const [lockError, setLockError] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('rowina_lock_config', JSON.stringify(appLockConfig));
+    localStorage.setItem('lethal_lock_config', JSON.stringify(appLockConfig));
   }, [appLockConfig]);
 
   useEffect(() => {
-    localStorage.setItem('rowina_currency', currencyCode);
+    localStorage.setItem('lethal_currency', currencyCode);
   }, [currencyCode]);
 
   useEffect(() => {
@@ -516,7 +659,7 @@ export default function App() {
         setConfirmModal({
           isOpen: true,
           title: 'INSTALL ON IOS',
-          message: 'To install Rowina Sales on your iPhone/iPad: tap the share button (square with arrow) in Safari and then select "Add to Home Screen".',
+          message: 'To install Rowina finance on your iPhone/iPad: tap the share button (square with arrow) in Safari and then select "Add to Home Screen".',
           onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
         });
       }
@@ -538,6 +681,53 @@ export default function App() {
     }
     action();
   };
+
+  const SUBSCRIPTION_PLANS: Subscription[] = [
+    {
+      id: 'free',
+      name: 'Starter',
+      price: 0,
+      interval: 'monthly',
+      features: [
+        'Up to 2 Stores',
+        'Basic Inventory Tracking',
+        'Sales Reports (Daily)',
+        'Email Support',
+        'PWA Installation'
+      ],
+      isPopular: false
+    },
+    {
+      id: 'pro',
+      name: 'Professional',
+      price: 29,
+      interval: 'monthly',
+      features: [
+        'Up to 10 Stores',
+        'Advanced Analytics',
+        'Staff Management',
+        'Client Ledger & Credit',
+        'Priority Support',
+        'Custom Alert Rules'
+      ],
+      isPopular: true
+    },
+    {
+      id: 'enterprise',
+      name: 'Enterprise',
+      price: 99,
+      interval: 'monthly',
+      features: [
+        'Unlimited Stores',
+        'Multi-user Roles',
+        'API Access',
+        'Dedicated Account Manager',
+        'Custom Integrations',
+        'White-label Reports'
+      ],
+      isPopular: false
+    }
+  ];
 
   const getDayStats = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -563,6 +753,7 @@ export default function App() {
   // Auth and User Profile Sync
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
+      setIsAuthReady(false);
       setUser(currentUser);
       if (currentUser) {
         // Sync user profile/role
@@ -579,10 +770,15 @@ export default function App() {
           } else {
             // Check if there's a pre-authorized role by email or phone
             let preAuthDoc: any = null;
-            if (email) {
-              preAuthDoc = await getDoc(doc(db, 'users', email));
-            } else if (phone) {
-              preAuthDoc = await getDoc(doc(db, 'users', phone));
+            try {
+              if (email) {
+                preAuthDoc = await getDoc(doc(db, 'users', email));
+              } else if (phone) {
+                preAuthDoc = await getDoc(doc(db, 'users', phone));
+              }
+            } catch (authError) {
+              // Silent fail for pre-auth check if permissions are denied
+              console.warn("Pre-authorization check skipped due to permissions.");
             }
 
             let role: UserRole = email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
@@ -602,7 +798,7 @@ export default function App() {
             const newProfile: UserProfile = {
               id: currentUser.uid,
               email: email || '',
-              phone: phone || undefined,
+              phone: phone || '',
               role: role,
               displayName: displayName,
               assignedStoreIds: assignedStoreIds
@@ -681,9 +877,12 @@ export default function App() {
       setTriggeredAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TriggeredAlert)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'triggeredAlerts'));
 
-    const unsubStaff = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
-    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+    let unsubStaff = () => {};
+    if (user && userRole === 'executive') {
+      unsubStaff = onSnapshot(collection(db, 'users'), (snapshot) => {
+        setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
+      }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
+    }
 
     return () => {
       unsubStores();
@@ -1307,12 +1506,12 @@ export default function App() {
     
     // Header
     doc.setFontSize(22);
-    doc.setTextColor(10, 132, 255); // Rowina Blue
-    doc.text('ROWINA SALES TRACKER', 105, 20, { align: 'center' });
+    doc.setTextColor(10, 132, 255); // Lethal Blue
+    doc.text('LETHAL FINANCE', 105, 20, { align: 'center' });
     
     doc.setFontSize(14);
     doc.setTextColor(100);
-    doc.text(`DAILY OPERATIONAL REPORT: ${dateStr}`, 105, 30, { align: 'center' });
+    doc.text(`FINANCIAL OPERATIONAL REPORT: ${dateStr}`, 105, 30, { align: 'center' });
     
     // Stats Summary
     const daySales = sales.filter(s => s.date === reportDate);
@@ -1387,7 +1586,7 @@ export default function App() {
       });
     }
 
-    doc.save(`Rowina_Report_${reportDate}.pdf`);
+    doc.save(`Lethal_Finance_Report_${reportDate}.pdf`);
   };
 
   const handleLogin = async () => {
@@ -1566,7 +1765,7 @@ export default function App() {
   };
 
   const handleForgotLock = () => {
-    localStorage.removeItem('rowina_lock_config');
+    localStorage.removeItem('lethal_lock_config');
     setAppLockConfig({ type: null, value: null });
     setIsAppLocked(false);
     handleLogout();
@@ -1631,7 +1830,7 @@ export default function App() {
       <div className="min-h-screen bg-rowina-black flex items-center justify-center">
         <div className="text-center space-y-4">
           <div className="w-16 h-16 border-4 border-rowina-blue border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="rowina-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Rowina Systems...</p>
+          <p className="lethal-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Lethal Systems...</p>
         </div>
       </div>
     );
@@ -1642,8 +1841,8 @@ export default function App() {
       <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-12 text-center">
           <div className="space-y-4">
-            <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white">Rowina<br />Sales</h1>
-            <p className="rowina-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">Professional Sales Tracking</p>
+            <h1 className="text-6xl sm:text-8xl lethal-title font-bold text-white">Lethal<br />Finance</h1>
+            <p className="lethal-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">High Performance Finance</p>
           </div>
           
           <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
@@ -1992,7 +2191,7 @@ export default function App() {
       {/* Header */}
       <header className="mb-12">
         <div className="flex justify-between items-start mb-4">
-          <h1 className="text-4xl sm:text-6xl rowina-title font-bold">Rowina<br />Sales</h1>
+          <h1 className="text-4xl sm:text-6xl lethal-title font-bold">Lethal<br />Finance</h1>
           <div className="flex gap-4 items-start">
             <div className="flex flex-col gap-2">
               {stores.length > 0 && (
@@ -2098,6 +2297,7 @@ export default function App() {
           { id: 'alerts', label: 'ALERTS' },
           { id: 'staff', label: 'STAFF' },
           { id: 'stores', label: 'STORES' },
+          { id: 'subscriptions', label: 'SUBSCRIPTIONS' },
           { id: 'security', label: 'SECURITY' },
           { id: 'help', label: 'HELP' },
         ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores')).map((tab) => (
@@ -2437,14 +2637,14 @@ export default function App() {
                     <ArrowLeft size={16} /> BACK TO STORE
                   </button>
                   <button 
-                    onClick={() => {
+                    onClick={() => requireAuth(() => {
                       const product = products.find(p => p.id === selectedProductId);
                       if (product) {
                         setRestockForm({ ...restockForm, productId: product.id, unitCost: product.buyingPrice });
                         setModalSearch('');
                         setIsRestockModalOpen(true);
                       }
-                    }}
+                    })}
                     className="flex items-center gap-2 text-emerald-500 hover:text-emerald-400 transition-colors rowina-mono text-[10px] font-bold border border-emerald-500/30 px-4 py-2 rounded-full"
                   >
                     <Package size={14} /> RESTOCK UNIT
@@ -2975,7 +3175,7 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Alert Command</h2>
               <button 
-                onClick={() => setIsAlertModalOpen(true)}
+                onClick={() => requireAuth(() => setIsAlertModalOpen(true))}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -3039,7 +3239,7 @@ export default function App() {
                 <div className="bg-rowina-gray/30 border border-dashed border-zinc-800 p-12 rounded-[2rem] text-center">
                   <Activity className="mx-auto text-zinc-800 mb-4" size={32} />
                   <p className="rowina-mono text-[10px] text-zinc-600">NO ACTIVE SURVEILLANCE RULES</p>
-                  <button onClick={() => setIsAlertModalOpen(true)} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
+                  <button onClick={() => requireAuth(() => setIsAlertModalOpen(true))} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -3167,11 +3367,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Staff Command</h2>
               <button 
-                onClick={() => {
+                onClick={() => requireAuth(() => {
                   setEditingStaff(null);
                   setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
                   setIsStaffModalOpen(true);
-                }}
+                })}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -3231,7 +3431,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button 
-                        onClick={() => {
+                        onClick={() => requireAuth(() => {
                           setEditingStaff(member);
                           setStaffForm({ 
                             email: member.email, 
@@ -3240,13 +3440,13 @@ export default function App() {
                             assignedStoreIds: member.assignedStoreIds || []
                           });
                           setIsStaffModalOpen(true);
-                        }}
+                        })}
                         className="p-2 text-zinc-500 hover:text-rowina-blue transition-colors"
                       >
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => handleDeleteStaff(member.id)}
+                        onClick={() => requireAuth(() => handleDeleteStaff(member.id))}
                         className="p-2 text-zinc-500 hover:text-rose-500 transition-colors"
                       >
                         <Trash2 size={16} />
@@ -3268,11 +3468,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Store Command</h2>
               <button 
-                onClick={() => {
+                onClick={() => requireAuth(() => {
                   setEditingStore(null);
                   setStoreForm({ name: '', location: '' });
                   setIsStoreModalOpen(true);
-                }}
+                })}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -3293,12 +3493,12 @@ export default function App() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button 
-                      onClick={() => {
+                      onClick={() => requireAuth(() => {
                         if (isSubmitting) return;
                         setEditingStore(store);
                         setStoreForm({ name: store.name, location: store.location || '' });
                         setIsStoreModalOpen(true);
-                      }}
+                      })}
                       disabled={isSubmitting}
                       className={cn(
                         "p-2 transition-colors",
@@ -3308,7 +3508,7 @@ export default function App() {
                       <Edit2 size={16} />
                     </button>
                     <button 
-                      onClick={() => !isSubmitting && handleDeleteStore(store.id)}
+                      onClick={() => !isSubmitting && requireAuth(() => handleDeleteStore(store.id))}
                       disabled={isSubmitting}
                       className={cn(
                         "p-2 transition-colors",
@@ -3323,6 +3523,74 @@ export default function App() {
             </div>
           </motion.div>
         )}
+        {activeTab === 'subscriptions' && (
+          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="text-center space-y-2">
+              <h2 className="text-3xl font-bold text-white">Choose Your Plan</h2>
+              <p className="text-rowina-gray">Unlock advanced features and scale your business with Rowina.</p>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto px-4">
+              {SUBSCRIPTION_PLANS.map((plan) => (
+                <div 
+                  key={plan.id}
+                  className={`relative p-8 rounded-2xl border transition-all duration-300 hover:scale-[1.02] ${
+                    plan.isPopular 
+                      ? 'bg-rowina-blue/10 border-rowina-blue shadow-[0_0_20px_rgba(59,130,246,0.2)]' 
+                      : 'bg-rowina-black/40 border-white/10 hover:border-white/20'
+                  }`}
+                >
+                  {plan.isPopular && (
+                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-rowina-blue text-white text-xs font-bold px-4 py-1 rounded-full">
+                      MOST POPULAR
+                    </div>
+                  )}
+
+                  <div className="space-y-4">
+                    <div>
+                      <h3 className="text-xl font-bold text-white">{plan.name}</h3>
+                      <div className="mt-2 flex items-baseline gap-1">
+                        <span className="text-4xl font-bold text-white">${plan.price}</span>
+                        <span className="text-rowina-gray">/{plan.interval}</span>
+                      </div>
+                    </div>
+
+                    <ul className="space-y-3 py-6">
+                      {plan.features.map((feature, i) => (
+                        <li key={i} className="flex items-start gap-3 text-sm text-rowina-gray">
+                          <Check className="w-4 h-4 text-rowina-blue shrink-0 mt-0.5" />
+                          <span>{feature}</span>
+                        </li>
+                      ))}
+                    </ul>
+
+                    <button
+                      onClick={() => requireAuth(() => {
+                        // Here we would integrate with a payment gateway
+                        console.log(`Redirecting to payment for ${plan.name} plan...`);
+                      })}
+                      className={`w-full py-3 rounded-xl font-bold transition-all ${
+                        plan.isPopular
+                          ? 'bg-rowina-blue text-white hover:bg-blue-600 shadow-lg shadow-blue-500/20'
+                          : 'bg-white/10 text-white hover:bg-white/20'
+                      } ${userProfile?.subscriptionTier === plan.id ? 'opacity-50 cursor-default' : ''}`}
+                      disabled={userProfile?.subscriptionTier === plan.id}
+                    >
+                      {userProfile?.subscriptionTier === plan.id ? 'Current Plan' : `Get ${plan.name}`}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="bg-rowina-blue/5 border border-rowina-blue/20 rounded-2xl p-8 max-w-4xl mx-auto text-center space-y-4">
+              <h3 className="text-xl font-bold text-white">Need a Custom Enterprise Solution?</h3>
+              <p className="text-rowina-gray">We offer tailored plans for large organizations with complex multi-store requirements.</p>
+              <button className="text-rowina-blue font-bold hover:underline">Contact Sales Support</button>
+            </div>
+          </div>
+        )}
+
         {activeTab === 'help' && (
           <motion.div
             key="help"
@@ -3431,7 +3699,7 @@ export default function App() {
                 For technical issues or custom feature requests, contact your system administrator.
               </p>
               <div className="pt-4">
-                <p className="rowina-mono text-[10px] text-zinc-600 uppercase tracking-[0.2em]">Rowina Sales Tracker • Version 1.0.0</p>
+                <p className="lethal-mono text-[10px] text-zinc-600 uppercase tracking-[0.2em]">Rowina finance • Version 1.0.0</p>
               </div>
             </div>
           </motion.div>
