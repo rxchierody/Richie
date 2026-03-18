@@ -567,7 +567,8 @@ export default function App() {
       if (currentUser) {
         // Sync user profile/role
         const userDocRef = doc(db, 'users', currentUser.uid);
-        const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
+        const email = currentUser.email?.toLowerCase();
+        const phone = currentUser.phoneNumber;
         
         try {
           const userDoc = await getDoc(userDocRef);
@@ -576,25 +577,32 @@ export default function App() {
             setUserProfile({ ...data, id: userDoc.id });
             setUserRole(data.role);
           } else {
-            // Check if there's a pre-authorized role by email
-            const emailDoc = await getDoc(emailDocRef);
-            let role: UserRole = currentUser.email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
+            // Check if there's a pre-authorized role by email or phone
+            let preAuthDoc: any = null;
+            if (email) {
+              preAuthDoc = await getDoc(doc(db, 'users', email));
+            } else if (phone) {
+              preAuthDoc = await getDoc(doc(db, 'users', phone));
+            }
+
+            let role: UserRole = email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
             let displayName = currentUser.displayName || '';
             let assignedStoreIds: string[] = [];
 
-            if (emailDoc.exists()) {
-              const data = emailDoc.data() as UserProfile;
+            if (preAuthDoc && preAuthDoc.exists()) {
+              const data = preAuthDoc.data() as UserProfile;
               role = data.role;
               displayName = data.displayName || displayName;
               assignedStoreIds = data.assignedStoreIds || [];
-              // Delete the temporary email-based doc
-              await deleteDoc(emailDocRef);
+              // Delete the temporary doc
+              await deleteDoc(preAuthDoc.ref);
             }
 
             // Create the permanent UID-based doc
             const newProfile: UserProfile = {
               id: currentUser.uid,
-              email: currentUser.email || '',
+              email: email || '',
+              phone: phone || undefined,
               role: role,
               displayName: displayName,
               assignedStoreIds: assignedStoreIds
@@ -1438,15 +1446,19 @@ export default function App() {
       setShowAuthScreen(false);
     } catch (error: any) {
       console.error("Email auth failed:", error);
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
-        setLoginError("INVALID EMAIL OR PASSWORD");
+      let message = "AUTHENTICATION FAILED";
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        message = "INVALID EMAIL OR PASSWORD";
       } else if (error.code === 'auth/email-already-in-use') {
-        setLoginError("EMAIL ALREADY REGISTERED");
+        message = "EMAIL ALREADY REGISTERED";
       } else if (error.code === 'auth/weak-password') {
-        setLoginError("PASSWORD TOO WEAK (MIN 6 CHARS)");
-      } else {
-        setLoginError("AUTHENTICATION FAILED");
+        message = "PASSWORD TOO WEAK (MIN 6 CHARS)";
+      } else if (error.code === 'auth/invalid-email') {
+        message = "INVALID EMAIL FORMAT";
+      } else if (error.code === 'auth/too-many-requests') {
+        message = "TOO MANY ATTEMPTS. TRY LATER.";
       }
+      setLoginError(message);
     } finally {
       setIsLoggingIn(false);
     }
@@ -1454,6 +1466,11 @@ export default function App() {
 
   const setupRecaptcha = () => {
     if (!(window as any).recaptchaVerifier) {
+      const container = document.getElementById('recaptcha-container');
+      if (!container) {
+        console.error("Recaptcha container not found");
+        return;
+      }
       try {
         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
           'size': 'invisible',
@@ -1480,13 +1497,24 @@ export default function App() {
     try {
       setupRecaptcha();
       const appVerifier = (window as any).recaptchaVerifier;
+      if (!appVerifier) {
+        throw new Error("RECAPTCHA_NOT_INITIALIZED");
+      }
       // Prepend country code if not present
       const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber.startsWith('0') ? phoneNumber.slice(1) : phoneNumber}`;
       const result = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
       setConfirmationResult(result);
     } catch (error: any) {
       console.error("SMS send failed:", error);
-      setLoginError("FAILED TO SEND SMS. CHECK NUMBER FORMAT.");
+      let message = "FAILED TO SEND SMS. CHECK NUMBER FORMAT.";
+      if (error.message === "RECAPTCHA_NOT_INITIALIZED") {
+        message = "SECURITY CHECK FAILED. REFRESH AND TRY AGAIN.";
+      } else if (error.code === 'auth/invalid-phone-number') {
+        message = "INVALID PHONE NUMBER FORMAT";
+      } else if (error.code === 'auth/too-many-requests') {
+        message = "TOO MANY ATTEMPTS. TRY LATER.";
+      }
+      setLoginError(message);
       if ((window as any).recaptchaVerifier) {
         (window as any).recaptchaVerifier.clear();
         (window as any).recaptchaVerifier = null;
@@ -1516,6 +1544,15 @@ export default function App() {
       setIsLoggingIn(false);
     }
   };
+
+  useEffect(() => {
+    return () => {
+      if ((window as any).recaptchaVerifier) {
+        (window as any).recaptchaVerifier.clear();
+        (window as any).recaptchaVerifier = null;
+      }
+    };
+  }, [authMethod]);
 
   const handleUnlock = () => {
     if (lockInput === appLockConfig.value) {
