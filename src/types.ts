@@ -104,7 +104,6 @@ export interface ClientTransaction {
 export interface UserProfile {
   id: string;
   email: string;
-  phone?: string;
   role: UserRole;
   displayName: string;
   assignedStoreIds?: string[];

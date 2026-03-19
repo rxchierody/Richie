@@ -87,8 +87,7 @@ import {
   createUserWithEmailAndPassword,
   RecaptchaVerifier,
   signInWithPhoneNumber,
-  updateProfile,
-  sendEmailVerification
+  updateProfile
 } from 'firebase/auth';
 import type { User } from 'firebase/auth';
 import { 
@@ -109,244 +108,6 @@ import {
 
 type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
-
-const COUNTRY_CODES = [
-  { code: '+93', name: 'Afghanistan', flag: '🇦🇫' },
-  { code: '+355', name: 'Albania', flag: '🇦🇱' },
-  { code: '+213', name: 'Algeria', flag: '🇩🇿' },
-  { code: '+376', name: 'Andorra', flag: '🇦🇩' },
-  { code: '+244', name: 'Angola', flag: '🇦🇴' },
-  { code: '+1-264', name: 'Anguilla', flag: '🇦🇮' },
-  { code: '+1-268', name: 'Antigua and Barbuda', flag: '🇦🇬' },
-  { code: '+54', name: 'Argentina', flag: '🇦🇷' },
-  { code: '+374', name: 'Armenia', flag: '🇦🇲' },
-  { code: '+297', name: 'Aruba', flag: '🇦🇼' },
-  { code: '+61', name: 'Australia', flag: '🇦🇺' },
-  { code: '+43', name: 'Austria', flag: '🇦🇹' },
-  { code: '+994', name: 'Azerbaijan', flag: '🇦🇿' },
-  { code: '+1-242', name: 'Bahamas', flag: '🇧🇸' },
-  { code: '+973', name: 'Bahrain', flag: '🇧🇭' },
-  { code: '+880', name: 'Bangladesh', flag: '🇧🇩' },
-  { code: '+1-246', name: 'Barbados', flag: '🇧🇧' },
-  { code: '+375', name: 'Belarus', flag: '🇧🇾' },
-  { code: '+32', name: 'Belgium', flag: '🇧🇪' },
-  { code: '+501', name: 'Belize', flag: '🇧🇿' },
-  { code: '+229', name: 'Benin', flag: '🇧🇯' },
-  { code: '+1-441', name: 'Bermuda', flag: '🇧🇲' },
-  { code: '+975', name: 'Bhutan', flag: '🇧🇹' },
-  { code: '+591', name: 'Bolivia', flag: '🇧🇴' },
-  { code: '+387', name: 'Bosnia and Herzegovina', flag: '🇧🇦' },
-  { code: '+267', name: 'Botswana', flag: '🇧🇼' },
-  { code: '+55', name: 'Brazil', flag: '🇧🇷' },
-  { code: '+1-284', name: 'British Virgin Islands', flag: '🇻🇬' },
-  { code: '+673', name: 'Brunei', flag: '🇧🇳' },
-  { code: '+359', name: 'Bulgaria', flag: '🇧🇬' },
-  { code: '+226', name: 'Burkina Faso', flag: '🇧🇫' },
-  { code: '+257', name: 'Burundi', flag: '🇧🇮' },
-  { code: '+855', name: 'Cambodia', flag: '🇰🇭' },
-  { code: '+237', name: 'Cameroon', flag: '🇨🇲' },
-  { code: '+1', name: 'Canada', flag: '🇨🇦' },
-  { code: '+238', name: 'Cape Verde', flag: '🇨🇻' },
-  { code: '+1-345', name: 'Cayman Islands', flag: '🇰🇾' },
-  { code: '+236', name: 'Central African Republic', flag: '🇨🇫' },
-  { code: '+235', name: 'Chad', flag: '🇹🇩' },
-  { code: '+56', name: 'Chile', flag: '🇨🇱' },
-  { code: '+86', name: 'China', flag: '🇨🇳' },
-  { code: '+57', name: 'Colombia', flag: '🇨🇴' },
-  { code: '+269', name: 'Comoros', flag: '🇰🇲' },
-  { code: '+242', name: 'Congo', flag: '🇨🇬' },
-  { code: '+682', name: 'Cook Islands', flag: '🇨🇰' },
-  { code: '+506', name: 'Costa Rica', flag: '🇨🇷' },
-  { code: '+385', name: 'Croatia', flag: '🇭🇷' },
-  { code: '+53', name: 'Cuba', flag: '🇨🇺' },
-  { code: '+357', name: 'Cyprus', flag: '🇨🇾' },
-  { code: '+420', name: 'Czech Republic', flag: '🇨🇿' },
-  { code: '+243', name: 'DR Congo', flag: '🇨🇩' },
-  { code: '+45', name: 'Denmark', flag: '🇩🇰' },
-  { code: '+253', name: 'Djibouti', flag: '🇩🇯' },
-  { code: '+1-767', name: 'Dominica', flag: '🇩🇲' },
-  { code: '+1-809', name: 'Dominican Republic', flag: '🇩🇴' },
-  { code: '+593', name: 'Ecuador', flag: '🇪🇨' },
-  { code: '+20', name: 'Egypt', flag: '🇪🇬' },
-  { code: '+503', name: 'El Salvador', flag: '🇸🇻' },
-  { code: '+240', name: 'Equatorial Guinea', flag: '🇬🇶' },
-  { code: '+291', name: 'Eritrea', flag: '🇪🇷' },
-  { code: '+372', name: 'Estonia', flag: '🇪🇪' },
-  { code: '+268', name: 'Eswatini', flag: '🇸🇿' },
-  { code: '+251', name: 'Ethiopia', flag: '🇪🇹' },
-  { code: '+500', name: 'Falkland Islands', flag: '🇫🇰' },
-  { code: '+298', name: 'Faroe Islands', flag: '🇫🇴' },
-  { code: '+679', name: 'Fiji', flag: '🇫🇯' },
-  { code: '+358', name: 'Finland', flag: '🇫🇮' },
-  { code: '+33', name: 'France', flag: '🇫🇷' },
-  { code: '+594', name: 'French Guiana', flag: '🇬🇫' },
-  { code: '+689', name: 'French Polynesia', flag: '🇵🇫' },
-  { code: '+241', name: 'Gabon', flag: '🇬🇦' },
-  { code: '+220', name: 'Gambia', flag: '🇬🇲' },
-  { code: '+995', name: 'Georgia', flag: '🇬🇪' },
-  { code: '+49', name: 'Germany', flag: '🇩🇪' },
-  { code: '+233', name: 'Ghana', flag: '🇬🇭' },
-  { code: '+350', name: 'Gibraltar', flag: '🇬🇮' },
-  { code: '+30', name: 'Greece', flag: '🇬🇷' },
-  { code: '+299', name: 'Greenland', flag: '🇬🇱' },
-  { code: '+1-473', name: 'Grenada', flag: '🇬🇩' },
-  { code: '+590', name: 'Guadeloupe', flag: '🇬🇵' },
-  { code: '+1-671', name: 'Guam', flag: '🇬🇺' },
-  { code: '+502', name: 'Guatemala', flag: '🇬🇹' },
-  { code: '+224', name: 'Guinea', flag: '🇬🇳' },
-  { code: '+245', name: 'Guinea-Bissau', flag: '🇬🇼' },
-  { code: '+592', name: 'Guyana', flag: '🇬🇾' },
-  { code: '+509', name: 'Haiti', flag: '🇭🇹' },
-  { code: '+504', name: 'Honduras', flag: '🇭🇳' },
-  { code: '+852', name: 'Hong Kong', flag: '🇭🇰' },
-  { code: '+36', name: 'Hungary', flag: '🇭🇺' },
-  { code: '+354', name: 'Iceland', flag: '🇮🇸' },
-  { code: '+91', name: 'India', flag: '🇮🇳' },
-  { code: '+62', name: 'Indonesia', flag: '🇮🇩' },
-  { code: '+98', name: 'Iran', flag: '🇮🇷' },
-  { code: '+964', name: 'Iraq', flag: '🇮🇶' },
-  { code: '+353', name: 'Ireland', flag: '🇮🇪' },
-  { code: '+972', name: 'Israel', flag: '🇮🇱' },
-  { code: '+39', name: 'Italy', flag: '🇮🇹' },
-  { code: '+1-876', name: 'Jamaica', flag: '🇯🇲' },
-  { code: '+81', name: 'Japan', flag: '🇯🇵' },
-  { code: '+962', name: 'Jordan', flag: '🇯🇴' },
-  { code: '+7', name: 'Kazakhstan', flag: '🇰🇿' },
-  { code: '+254', name: 'Kenya', flag: '🇰🇪' },
-  { code: '+686', name: 'Kiribati', flag: '🇰🇮' },
-  { code: '+965', name: 'Kuwait', flag: '🇰🇼' },
-  { code: '+996', name: 'Kyrgyzstan', flag: '🇰🇬' },
-  { code: '+856', name: 'Laos', flag: '🇱🇦' },
-  { code: '+371', name: 'Latvia', flag: '🇱🇻' },
-  { code: '+961', name: 'Lebanon', flag: '🇱🇧' },
-  { code: '+266', name: 'Lesotho', flag: '🇱🇸' },
-  { code: '+231', name: 'Liberia', flag: '🇱🇷' },
-  { code: '+218', name: 'Libya', flag: '🇱🇾' },
-  { code: '+423', name: 'Liechtenstein', flag: '🇱🇮' },
-  { code: '+370', name: 'Lithuania', flag: '🇱🇹' },
-  { code: '+352', name: 'Luxembourg', flag: '🇱🇺' },
-  { code: '+853', name: 'Macau', flag: '🇲🇴' },
-  { code: '+389', name: 'Macedonia', flag: '🇲🇰' },
-  { code: '+261', name: 'Madagascar', flag: '🇲🇬' },
-  { code: '+265', name: 'Malawi', flag: '🇲🇼' },
-  { code: '+60', name: 'Malaysia', flag: '🇲🇾' },
-  { code: '+960', name: 'Maldives', flag: '🇲🇻' },
-  { code: '+223', name: 'Mali', flag: '🇲🇱' },
-  { code: '+356', name: 'Malta', flag: '🇲🇹' },
-  { code: '+692', name: 'Marshall Islands', flag: '🇲🇭' },
-  { code: '+596', name: 'Martinique', flag: '🇲🇶' },
-  { code: '+222', name: 'Mauritania', flag: '🇲🇷' },
-  { code: '+230', name: 'Mauritius', flag: '🇲🇺' },
-  { code: '+262', name: 'Mayotte', flag: '🇾🇹' },
-  { code: '+52', name: 'Mexico', flag: '🇲🇽' },
-  { code: '+691', name: 'Micronesia', flag: '🇫🇲' },
-  { code: '+373', name: 'Moldova', flag: '🇲🇩' },
-  { code: '+377', name: 'Monaco', flag: '🇲🇨' },
-  { code: '+976', name: 'Mongolia', flag: '🇲🇳' },
-  { code: '+382', name: 'Montenegro', flag: '🇲🇪' },
-  { code: '+1-664', name: 'Montserrat', flag: '🇲🇸' },
-  { code: '+212', name: 'Morocco', flag: '🇲🇦' },
-  { code: '+258', name: 'Mozambique', flag: '🇲🇿' },
-  { code: '+95', name: 'Myanmar', flag: '🇲🇲' },
-  { code: '+264', name: 'Namibia', flag: '🇳🇦' },
-  { code: '+674', name: 'Nauru', flag: '🇳🇷' },
-  { code: '+977', name: 'Nepal', flag: '🇳🇵' },
-  { code: '+31', name: 'Netherlands', flag: '🇳🇱' },
-  { code: '+687', name: 'New Caledonia', flag: '🇳🇨' },
-  { code: '+64', name: 'New Zealand', flag: '🇳🇿' },
-  { code: '+505', name: 'Nicaragua', flag: '🇳🇮' },
-  { code: '+227', name: 'Niger', flag: '🇳🇪' },
-  { code: '+234', name: 'Nigeria', flag: '🇳🇬' },
-  { code: '+683', name: 'Niue', flag: '🇳🇺' },
-  { code: '+672', name: 'Norfolk Island', flag: '🇳🇫' },
-  { code: '+850', name: 'North Korea', flag: '🇰🇵' },
-  { code: '+1-670', name: 'Northern Mariana Islands', flag: '🇲🇵' },
-  { code: '+47', name: 'Norway', flag: '🇳🇴' },
-  { code: '+968', name: 'Oman', flag: '🇴🇲' },
-  { code: '+92', name: 'Pakistan', flag: '🇵🇰' },
-  { code: '+680', name: 'Palau', flag: '🇵🇼' },
-  { code: '+970', name: 'Palestine', flag: '🇵🇸' },
-  { code: '+507', name: 'Panama', flag: '🇵🇦' },
-  { code: '+675', name: 'Papua New Guinea', flag: '🇵🇬' },
-  { code: '+595', name: 'Paraguay', flag: '🇵🇾' },
-  { code: '+51', name: 'Peru', flag: '🇵🇪' },
-  { code: '+63', name: 'Philippines', flag: '🇵🇭' },
-  { code: '+48', name: 'Poland', flag: '🇵🇱' },
-  { code: '+351', name: 'Portugal', flag: '🇵🇹' },
-  { code: '+1-787', name: 'Puerto Rico', flag: '🇵🇷' },
-  { code: '+974', name: 'Qatar', flag: '🇶🇦' },
-  { code: '+262', name: 'Reunion', flag: '🇷🇪' },
-  { code: '+40', name: 'Romania', flag: '🇷🇴' },
-  { code: '+7', name: 'Russia', flag: '🇷🇺' },
-  { code: '+250', name: 'Rwanda', flag: '🇷🇼' },
-  { code: '+685', name: 'Samoa', flag: '🇼🇸' },
-  { code: '+378', name: 'San Marino', flag: '🇸🇲' },
-  { code: '+239', name: 'Sao Tome and Principe', flag: '🇸🇹' },
-  { code: '+966', name: 'Saudi Arabia', flag: '🇸🇦' },
-  { code: '+221', name: 'Senegal', flag: '🇸🇳' },
-  { code: '+381', name: 'Serbia', flag: '🇷🇸' },
-  { code: '+248', name: 'Seychelles', flag: '🇸🇨' },
-  { code: '+232', name: 'Sierra Leone', flag: '🇸🇱' },
-  { code: '+65', name: 'Singapore', flag: '🇸🇬' },
-  { code: '+421', name: 'Slovakia', flag: '🇸🇰' },
-  { code: '+386', name: 'Slovenia', flag: '🇸🇮' },
-  { code: '+677', name: 'Solomon Islands', flag: '🇸🇧' },
-  { code: '+252', name: 'Somalia', flag: '🇸🇴' },
-  { code: '+27', name: 'South Africa', flag: '🇿🇦' },
-  { code: '+82', name: 'South Korea', flag: '🇰🇷' },
-  { code: '+211', name: 'South Sudan', flag: '🇸🇸' },
-  { code: '+34', name: 'Spain', flag: '🇪🇸' },
-  { code: '+94', name: 'Sri Lanka', flag: '🇱🇰' },
-  { code: '+1-869', name: 'St. Kitts and Nevis', flag: '🇰🇳' },
-  { code: '+1-758', name: 'St. Lucia', flag: '🇱🇨' },
-  { code: '+508', name: 'St. Pierre and Miquelon', flag: '🇵🇲' },
-  { code: '+1-784', name: 'St. Vincent and the Grenadines', flag: '🇻🇨' },
-  { code: '+249', name: 'Sudan', flag: '🇸🇩' },
-  { code: '+597', name: 'Suriname', flag: '🇸🇷' },
-  { code: '+46', name: 'Sweden', flag: '🇸🇪' },
-  { code: '+41', name: 'Switzerland', flag: '🇨🇭' },
-  { code: '+963', name: 'Syria', flag: '🇸🇾' },
-  { code: '+886', name: 'Taiwan', flag: '🇹🇼' },
-  { code: '+992', name: 'Tajikistan', flag: '🇹🇯' },
-  { code: '+255', name: 'Tanzania', flag: '🇹🇿' },
-  { code: '+66', name: 'Thailand', flag: '🇹🇭' },
-  { code: '+228', name: 'Togo', flag: '🇹🇬' },
-  { code: '+690', name: 'Tokelau', flag: '🇹🇰' },
-  { code: '+676', name: 'Tonga', flag: '🇹🇴' },
-  { code: '+1-868', name: 'Trinidad and Tobago', flag: '🇹🇹' },
-  { code: '+216', name: 'Tunisia', flag: '🇹🇳' },
-  { code: '+90', name: 'Turkey', flag: '🇹🇷' },
-  { code: '+993', name: 'Turkmenistan', flag: '🇹🇲' },
-  { code: '+1-649', name: 'Turks and Caicos Islands', flag: '🇹🇨' },
-  { code: '+688', name: 'Tuvalu', flag: '🇹🇻' },
-  { code: '+256', name: 'Uganda', flag: '🇺🇬' },
-  { code: '+380', name: 'Ukraine', flag: '🇺🇦' },
-  { code: '+971', name: 'UAE', flag: '🇦🇪' },
-  { code: '+44', name: 'UK', flag: '🇬🇧' },
-  { code: '+1', name: 'USA', flag: '🇺🇸' },
-  { code: '+598', name: 'Uruguay', flag: '🇺🇾' },
-  { code: '+998', name: 'Uzbekistan', flag: '🇺🇿' },
-  { code: '+678', name: 'Vanuatu', flag: '🇻🇺' },
-  { code: '+379', name: 'Vatican City', flag: '🇻🇦' },
-  { code: '+58', name: 'Venezuela', flag: '🇻🇪' },
-  { code: '+84', name: 'Vietnam', flag: '🇻🇳' },
-  { code: '+1-284', name: 'Virgin Islands, British', flag: '🇻🇬' },
-  { code: '+1-340', name: 'Virgin Islands, U.S.', flag: '🇻🇮' },
-  { code: '+681', name: 'Wallis and Futuna', flag: '🇼🇫' },
-  { code: '+967', name: 'Yemen', flag: '🇾🇪' },
-  { code: '+260', name: 'Zambia', flag: '🇿🇲' },
-  { code: '+263', name: 'Zimbabwe', flag: '🇿🇼' },
-  { code: '+253', name: 'Djibouti', flag: '🇩🇯' },
-  { code: '+291', name: 'Eritrea', flag: '🇪🇷' },
-  { code: '+265', name: 'Malawi', flag: '🇲🇼' },
-  { code: '+266', name: 'Lesotho', flag: '🇱🇸' },
-  { code: '+268', name: 'Eswatini', flag: '🇸🇿' },
-  { code: '+239', name: 'Sao Tome and Principe', flag: '🇸🇹' },
-  { code: '+238', name: 'Cape Verde', flag: '🇨🇻' },
-  { code: '+244', name: 'Angola', flag: '🇦🇴' },
-  { code: '+245', name: 'Guinea-Bissau', flag: '🇬🇼' },
-  { code: '+222', name: 'Mauritania', flag: '🇲🇷' },
-].sort((a, b) => a.name.localeCompare(b.name));
 
 enum OperationType {
   CREATE = 'create',
@@ -409,8 +170,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
       }
 
       return (
-        <div className="min-h-screen bg-lethal-black flex items-center justify-center p-6">
-          <div className="max-w-md w-full bg-lethal-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
+        <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
+          <div className="max-w-md w-full bg-rowina-gray p-8 rounded-[40px] border border-rose-500/30 space-y-6 text-center">
             <div className="w-16 h-16 bg-rose-500/10 rounded-full flex items-center justify-center mx-auto text-rose-500">
               <AlertTriangle size={32} />
             </div>
@@ -420,7 +181,7 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
             </div>
             <button 
               onClick={() => window.location.reload()}
-              className="w-full bg-lethal-blue text-black py-4 rounded-2xl font-bold lethal-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
+              className="w-full bg-rowina-blue text-black py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
             >
               REBOOT SYSTEM
             </button>
@@ -434,16 +195,8 @@ class ErrorBoundary extends React.Component<{ children: React.ReactNode }, Error
 }
 
 function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errorMessage = error instanceof Error ? error.message : String(error);
-  
-  // If user is not logged in and it's a permission error, it's likely a race condition or logout
-  if (errorMessage.includes('Missing or insufficient permissions') && !auth.currentUser) {
-    console.warn(`Firestore Permission Error (Logged Out): ${operationType} on ${path}`);
-    return;
-  }
-
   const errInfo: FirestoreErrorInfo = {
-    error: errorMessage,
+    error: error instanceof Error ? error.message : String(error),
     authInfo: {
       userId: auth.currentUser?.uid,
       email: auth.currentUser?.email,
@@ -481,8 +234,8 @@ const StatCard = ({
   const isGood = inverse ? !isPositive : isPositive;
   
   return (
-    <div className="bg-lethal-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
-      <p className="lethal-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
+    <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+      <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">{label}</p>
       <div className="mt-2">
         <p className={cn(
           "text-3xl sm:text-4xl font-bold tracking-tight",
@@ -490,7 +243,7 @@ const StatCard = ({
         )}>{value}</p>
       </div>
       <div className={cn(
-        "absolute bottom-5 right-6 flex items-center gap-1 lethal-mono text-[10px] font-bold",
+        "absolute bottom-5 right-6 flex items-center gap-1 rowina-mono text-[10px] font-bold",
         isGood ? "text-emerald-500" : "text-rose-500"
       )}>
         {isPositive ? <ArrowUpRight size={12} /> : <ArrowDownRight size={12} />}
@@ -507,30 +260,28 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
   const [phoneNumber, setPhoneNumber] = useState('');
-  const [countryCode, setCountryCode] = useState('+254');
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
   const [showAuthScreen, setShowAuthScreen] = useState(false);
-  const [verificationEmailSent, setVerificationEmailSent] = useState(false);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('lethal_currency') || 'USD');
+  const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('rowina_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
 
   const [appLockConfig, setAppLockConfig] = useState<{
     type: 'pin' | 'password' | null;
     value: string | null;
   }>(() => {
-    const saved = localStorage.getItem('lethal_lock_config');
+    const saved = localStorage.getItem('rowina_lock_config');
     return saved ? JSON.parse(saved) : { type: null, value: null };
   });
   const [isAppLocked, setIsAppLocked] = useState(() => {
-    const saved = localStorage.getItem('lethal_lock_config');
+    const saved = localStorage.getItem('rowina_lock_config');
     const config = saved ? JSON.parse(saved) : { type: null, value: null };
     return !!config.type;
   });
@@ -538,11 +289,11 @@ export default function App() {
   const [lockError, setLockError] = useState<string | null>(null);
 
   useEffect(() => {
-    localStorage.setItem('lethal_lock_config', JSON.stringify(appLockConfig));
+    localStorage.setItem('rowina_lock_config', JSON.stringify(appLockConfig));
   }, [appLockConfig]);
 
   useEffect(() => {
-    localStorage.setItem('lethal_currency', currencyCode);
+    localStorage.setItem('rowina_currency', currencyCode);
   }, [currencyCode]);
 
   useEffect(() => {
@@ -658,7 +409,7 @@ export default function App() {
         setConfirmModal({
           isOpen: true,
           title: 'INSTALL ON IOS',
-          message: 'To install Rowina finance on your iPhone/iPad: tap the share button (square with arrow) in Safari and then select "Add to Home Screen".',
+          message: 'To install Rowina Sales on your iPhone/iPad: tap the share button (square with arrow) in Safari and then select "Add to Home Screen".',
           onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
         });
       }
@@ -705,13 +456,11 @@ export default function App() {
   // Auth and User Profile Sync
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setIsAuthReady(false);
       setUser(currentUser);
       if (currentUser) {
         // Sync user profile/role
         const userDocRef = doc(db, 'users', currentUser.uid);
-        const email = currentUser.email?.toLowerCase();
-        const phone = currentUser.phoneNumber;
+        const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
         
         try {
           const userDoc = await getDoc(userDocRef);
@@ -720,37 +469,25 @@ export default function App() {
             setUserProfile({ ...data, id: userDoc.id });
             setUserRole(data.role);
           } else {
-            // Check if there's a pre-authorized role by email or phone
-            let preAuthDoc: any = null;
-            try {
-              if (email) {
-                preAuthDoc = await getDoc(doc(db, 'users', email));
-              } else if (phone) {
-                preAuthDoc = await getDoc(doc(db, 'users', phone));
-              }
-            } catch (authError) {
-              // Silent fail for pre-auth check if permissions are denied
-              console.warn("Pre-authorization check skipped due to permissions.");
-            }
-
-            let role: UserRole = email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
+            // Check if there's a pre-authorized role by email
+            const emailDoc = await getDoc(emailDocRef);
+            let role: UserRole = currentUser.email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
             let displayName = currentUser.displayName || '';
             let assignedStoreIds: string[] = [];
 
-            if (preAuthDoc && preAuthDoc.exists()) {
-              const data = preAuthDoc.data() as UserProfile;
+            if (emailDoc.exists()) {
+              const data = emailDoc.data() as UserProfile;
               role = data.role;
               displayName = data.displayName || displayName;
               assignedStoreIds = data.assignedStoreIds || [];
-              // Delete the temporary doc
-              await deleteDoc(preAuthDoc.ref);
+              // Delete the temporary email-based doc
+              await deleteDoc(emailDocRef);
             }
 
             // Create the permanent UID-based doc
             const newProfile: UserProfile = {
               id: currentUser.uid,
-              email: email || '',
-              phone: phone || '',
+              email: currentUser.email || '',
               role: role,
               displayName: displayName,
               assignedStoreIds: assignedStoreIds
@@ -829,12 +566,9 @@ export default function App() {
       setTriggeredAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TriggeredAlert)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'triggeredAlerts'));
 
-    let unsubStaff = () => {};
-    if (user && userRole === 'executive') {
-      unsubStaff = onSnapshot(collection(db, 'users'), (snapshot) => {
-        setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
-      }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
-    }
+    const unsubStaff = onSnapshot(collection(db, 'users'), (snapshot) => {
+      setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
     return () => {
       unsubStores();
@@ -855,9 +589,9 @@ export default function App() {
     async function testConnection() {
       try {
         await getDocFromServer(doc(db, 'test', 'connection'));
-      } catch (error: any) {
-        if (error?.code === 'unavailable' || (error instanceof Error && error.message.includes('the client is offline'))) {
-          console.error("Firebase Connection Error: Cloud Firestore backend is unreachable. Please verify your Firebase configuration and ensure the database is provisioned.");
+      } catch (error) {
+        if(error instanceof Error && error.message.includes('the client is offline')) {
+          console.error("Please check your Firebase configuration. ");
         }
       }
     }
@@ -1458,12 +1192,12 @@ export default function App() {
     
     // Header
     doc.setFontSize(22);
-    doc.setTextColor(10, 132, 255); // Lethal Blue
-    doc.text('LETHAL FINANCE', 105, 20, { align: 'center' });
+    doc.setTextColor(10, 132, 255); // Rowina Blue
+    doc.text('ROWINA SALES TRACKER', 105, 20, { align: 'center' });
     
     doc.setFontSize(14);
     doc.setTextColor(100);
-    doc.text(`FINANCIAL OPERATIONAL REPORT: ${dateStr}`, 105, 30, { align: 'center' });
+    doc.text(`DAILY OPERATIONAL REPORT: ${dateStr}`, 105, 30, { align: 'center' });
     
     // Stats Summary
     const daySales = sales.filter(s => s.date === reportDate);
@@ -1538,7 +1272,7 @@ export default function App() {
       });
     }
 
-    doc.save(`Lethal_Finance_Report_${reportDate}.pdf`);
+    doc.save(`Rowina_Report_${reportDate}.pdf`);
   };
 
   const handleLogin = async () => {
@@ -1580,9 +1314,6 @@ export default function App() {
         const userCredential = await createUserWithEmailAndPassword(auth, emailForm.email, emailForm.password);
         // Set display name in profile
         await updateProfile(userCredential.user, { displayName: emailForm.username });
-        // Send verification email
-        await sendEmailVerification(userCredential.user);
-        setVerificationEmailSent(true);
         // Also update Firestore profile
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           id: userCredential.user.uid,
@@ -1591,25 +1322,19 @@ export default function App() {
           displayName: emailForm.username,
           assignedStoreIds: []
         });
-        // Don't close auth screen immediately if we want to show verification message
-        return;
       }
       setShowAuthScreen(false);
     } catch (error: any) {
       console.error("Email auth failed:", error);
-      let message = "AUTHENTICATION FAILED";
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        message = "INVALID EMAIL OR PASSWORD";
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+        setLoginError("INVALID EMAIL OR PASSWORD");
       } else if (error.code === 'auth/email-already-in-use') {
-        message = "EMAIL ALREADY REGISTERED";
+        setLoginError("EMAIL ALREADY REGISTERED");
       } else if (error.code === 'auth/weak-password') {
-        message = "PASSWORD TOO WEAK (MIN 6 CHARS)";
-      } else if (error.code === 'auth/invalid-email') {
-        message = "INVALID EMAIL FORMAT";
-      } else if (error.code === 'auth/too-many-requests') {
-        message = "TOO MANY ATTEMPTS. TRY LATER.";
+        setLoginError("PASSWORD TOO WEAK (MIN 6 CHARS)");
+      } else {
+        setLoginError("AUTHENTICATION FAILED");
       }
-      setLoginError(message);
     } finally {
       setIsLoggingIn(false);
     }
@@ -1617,11 +1342,6 @@ export default function App() {
 
   const setupRecaptcha = () => {
     if (!(window as any).recaptchaVerifier) {
-      const container = document.getElementById('recaptcha-container');
-      if (!container) {
-        console.error("Recaptcha container not found");
-        return;
-      }
       try {
         (window as any).recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
           'size': 'invisible',
@@ -1648,24 +1368,11 @@ export default function App() {
     try {
       setupRecaptcha();
       const appVerifier = (window as any).recaptchaVerifier;
-      if (!appVerifier) {
-        throw new Error("RECAPTCHA_NOT_INITIALIZED");
-      }
-      // Prepend country code if not present
-      const formattedPhone = phoneNumber.startsWith('+') ? phoneNumber : `${countryCode}${phoneNumber.startsWith('0') ? phoneNumber.slice(1) : phoneNumber}`;
-      const result = await signInWithPhoneNumber(auth, formattedPhone, appVerifier);
+      const result = await signInWithPhoneNumber(auth, phoneNumber, appVerifier);
       setConfirmationResult(result);
     } catch (error: any) {
       console.error("SMS send failed:", error);
-      let message = "FAILED TO SEND SMS. CHECK NUMBER FORMAT.";
-      if (error.message === "RECAPTCHA_NOT_INITIALIZED") {
-        message = "SECURITY CHECK FAILED. REFRESH AND TRY AGAIN.";
-      } else if (error.code === 'auth/invalid-phone-number') {
-        message = "INVALID PHONE NUMBER FORMAT";
-      } else if (error.code === 'auth/too-many-requests') {
-        message = "TOO MANY ATTEMPTS. TRY LATER.";
-      }
-      setLoginError(message);
+      setLoginError("FAILED TO SEND SMS. USE FORMAT: +254...");
       if ((window as any).recaptchaVerifier) {
         (window as any).recaptchaVerifier.clear();
         (window as any).recaptchaVerifier = null;
@@ -1696,15 +1403,6 @@ export default function App() {
     }
   };
 
-  useEffect(() => {
-    return () => {
-      if ((window as any).recaptchaVerifier) {
-        (window as any).recaptchaVerifier.clear();
-        (window as any).recaptchaVerifier = null;
-      }
-    };
-  }, [authMethod]);
-
   const handleUnlock = () => {
     if (lockInput === appLockConfig.value) {
       setIsAppLocked(false);
@@ -1717,7 +1415,7 @@ export default function App() {
   };
 
   const handleForgotLock = () => {
-    localStorage.removeItem('lethal_lock_config');
+    localStorage.removeItem('rowina_lock_config');
     setAppLockConfig({ type: null, value: null });
     setIsAppLocked(false);
     handleLogout();
@@ -1782,7 +1480,7 @@ export default function App() {
       <div className="min-h-screen bg-rowina-black flex items-center justify-center">
         <div className="text-center space-y-4">
           <div className="w-16 h-16 border-4 border-rowina-blue border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="lethal-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Lethal Systems...</p>
+          <p className="rowina-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Rowina Systems...</p>
         </div>
       </div>
     );
@@ -1793,8 +1491,8 @@ export default function App() {
       <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
         <div className="max-w-md w-full space-y-12 text-center">
           <div className="space-y-4">
-            <h1 className="text-6xl sm:text-8xl lethal-title font-bold text-white">Lethal<br />Finance</h1>
-            <p className="lethal-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">High Performance Finance</p>
+            <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white">Rowina<br />Sales</h1>
+            <p className="rowina-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">Professional Sales Tracking</p>
           </div>
           
           <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
@@ -1802,42 +1500,11 @@ export default function App() {
               <Shield size={32} />
             </div>
             <div className="space-y-2">
-              <h2 className="text-xl font-bold text-white">{verificationEmailSent ? 'Check Your Inbox' : (authMode === 'login' ? 'Access Restricted' : 'Create Account')}</h2>
-              <p className="text-zinc-500 text-sm">{verificationEmailSent ? 'Please verify your email to continue.' : 'Please authenticate to perform this action.'}</p>
+              <h2 className="text-xl font-bold text-white">{authMode === 'login' ? 'Access Restricted' : 'Create Account'}</h2>
+              <p className="text-zinc-500 text-sm">Please authenticate to perform this action.</p>
             </div>
 
-            {verificationEmailSent ? (
-              <div className="space-y-6 py-4 text-center animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="w-20 h-20 bg-emerald-500/10 rounded-full flex items-center justify-center mx-auto text-emerald-500 mb-4">
-                  <Bell size={40} className="animate-bounce" />
-                </div>
-                <div className="space-y-2">
-                  <p className="text-zinc-400 text-sm leading-relaxed">
-                    A verification link has been sent to <span className="text-white font-medium">{emailForm.email}</span>. 
-                    Please verify your email to complete registration.
-                  </p>
-                </div>
-                <div className="pt-4 space-y-4">
-                  <button 
-                    onClick={() => {
-                      setVerificationEmailSent(false);
-                      setShowAuthScreen(false);
-                    }}
-                    className="w-full bg-rowina-blue text-black py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest hover:scale-[1.02] transition-all"
-                  >
-                    CONTINUE TO APP
-                  </button>
-                  <button 
-                    onClick={() => setVerificationEmailSent(false)}
-                    className="text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
-                  >
-                    Back to Sign In
-                  </button>
-                </div>
-              </div>
-            ) : (
-              <>
-                <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
+            <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
               <button 
                 onClick={() => { setAuthMethod('email'); setLoginError(null); }}
                 className={cn(
@@ -1916,27 +1583,13 @@ export default function App() {
                   <form onSubmit={handleSendCode} className="space-y-4">
                     <div className="space-y-2 text-left">
                       <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Phone Number</label>
-                      <div className="flex gap-2">
-                        <div className="relative w-32 shrink-0">
-                          <select 
-                            value={countryCode}
-                            onChange={e => setCountryCode(e.target.value)}
-                            className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-4 py-4 text-sm focus:border-rowina-blue outline-none transition-all appearance-none cursor-pointer"
-                          >
-                            {COUNTRY_CODES.map(c => (
-                              <option key={c.code} value={c.code}>{c.flag} {c.code}</option>
-                            ))}
-                          </select>
-                          <ChevronDown className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" size={12} />
-                        </div>
-                        <input 
-                          type="tel" 
-                          placeholder="700 000 000" 
-                          value={phoneNumber}
-                          onChange={e => setPhoneNumber(e.target.value)}
-                          className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                        />
-                      </div>
+                      <input 
+                        type="tel" 
+                        placeholder="+254 700 000 000" 
+                        value={phoneNumber}
+                        onChange={e => setPhoneNumber(e.target.value)}
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
+                      />
                     </div>
                     {loginError && (
                       <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
@@ -2023,9 +1676,7 @@ export default function App() {
                 Continue as Guest
               </button>
             </div>
-          </>
-        )}
-      </div>
+          </div>
           
           <p className="text-[10px] rowina-mono text-zinc-700 uppercase tracking-widest">
             Authorized Personnel Only • Encrypted Session
@@ -2094,39 +1745,6 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-rowina-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
-      {/* Email Verification Warning */}
-      {user && !user.emailVerified && authMethod === 'email' && (
-        <motion.div 
-          initial={{ opacity: 0, y: -20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="mb-8 bg-amber-500/10 border border-amber-500/20 rounded-3xl p-6 flex flex-col sm:flex-row items-center gap-6 text-center sm:text-left"
-        >
-          <div className="w-12 h-12 bg-amber-500/20 rounded-full flex items-center justify-center text-amber-500 shrink-0">
-            <AlertTriangle size={24} />
-          </div>
-          <div className="flex-1 space-y-1">
-            <h3 className="text-amber-500 font-bold rowina-mono text-xs uppercase tracking-widest">Email Not Verified</h3>
-            <p className="text-zinc-400 text-[10px] leading-relaxed">
-              Please check your inbox and verify your email address to secure your account and access all features.
-            </p>
-          </div>
-          <button 
-            onClick={async () => {
-              try {
-                await sendEmailVerification(user);
-                setLoginError("VERIFICATION EMAIL RESENT");
-                setTimeout(() => setLoginError(null), 3000);
-              } catch (error) {
-                console.error("Resend failed:", error);
-              }
-            }}
-            className="px-6 py-3 bg-amber-500 text-black rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:scale-105 transition-all whitespace-nowrap"
-          >
-            RESEND EMAIL
-          </button>
-        </motion.div>
-      )}
-
       {/* PWA Install Button */}
       {(showInstallButton || (isIOS && !isStandalone)) && (
         <motion.button
@@ -2143,7 +1761,7 @@ export default function App() {
       {/* Header */}
       <header className="mb-12">
         <div className="flex justify-between items-start mb-4">
-          <h1 className="text-4xl sm:text-6xl lethal-title font-bold">Lethal<br />Finance</h1>
+          <h1 className="text-4xl sm:text-6xl rowina-title font-bold">Rowina<br />Sales</h1>
           <div className="flex gap-4 items-start">
             <div className="flex flex-col gap-2">
               {stores.length > 0 && (
@@ -2588,14 +2206,14 @@ export default function App() {
                     <ArrowLeft size={16} /> BACK TO STORE
                   </button>
                   <button 
-                    onClick={() => requireAuth(() => {
+                    onClick={() => {
                       const product = products.find(p => p.id === selectedProductId);
                       if (product) {
                         setRestockForm({ ...restockForm, productId: product.id, unitCost: product.buyingPrice });
                         setModalSearch('');
                         setIsRestockModalOpen(true);
                       }
-                    })}
+                    }}
                     className="flex items-center gap-2 text-emerald-500 hover:text-emerald-400 transition-colors rowina-mono text-[10px] font-bold border border-emerald-500/30 px-4 py-2 rounded-full"
                   >
                     <Package size={14} /> RESTOCK UNIT
@@ -3126,7 +2744,7 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Alert Command</h2>
               <button 
-                onClick={() => requireAuth(() => setIsAlertModalOpen(true))}
+                onClick={() => setIsAlertModalOpen(true)}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -3190,7 +2808,7 @@ export default function App() {
                 <div className="bg-rowina-gray/30 border border-dashed border-zinc-800 p-12 rounded-[2rem] text-center">
                   <Activity className="mx-auto text-zinc-800 mb-4" size={32} />
                   <p className="rowina-mono text-[10px] text-zinc-600">NO ACTIVE SURVEILLANCE RULES</p>
-                  <button onClick={() => requireAuth(() => setIsAlertModalOpen(true))} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
+                  <button onClick={() => setIsAlertModalOpen(true)} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
                 </div>
               ) : (
                 <div className="space-y-3">
@@ -3318,11 +2936,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Staff Command</h2>
               <button 
-                onClick={() => requireAuth(() => {
+                onClick={() => {
                   setEditingStaff(null);
                   setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
                   setIsStaffModalOpen(true);
-                })}
+                }}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -3382,7 +3000,7 @@ export default function App() {
                     </div>
                     <div className="flex items-center gap-2">
                       <button 
-                        onClick={() => requireAuth(() => {
+                        onClick={() => {
                           setEditingStaff(member);
                           setStaffForm({ 
                             email: member.email, 
@@ -3391,13 +3009,13 @@ export default function App() {
                             assignedStoreIds: member.assignedStoreIds || []
                           });
                           setIsStaffModalOpen(true);
-                        })}
+                        }}
                         className="p-2 text-zinc-500 hover:text-rowina-blue transition-colors"
                       >
                         <Edit2 size={16} />
                       </button>
                       <button 
-                        onClick={() => requireAuth(() => handleDeleteStaff(member.id))}
+                        onClick={() => handleDeleteStaff(member.id)}
                         className="p-2 text-zinc-500 hover:text-rose-500 transition-colors"
                       >
                         <Trash2 size={16} />
@@ -3419,11 +3037,11 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Store Command</h2>
               <button 
-                onClick={() => requireAuth(() => {
+                onClick={() => {
                   setEditingStore(null);
                   setStoreForm({ name: '', location: '' });
                   setIsStoreModalOpen(true);
-                })}
+                }}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
               >
                 <Plus size={20} />
@@ -3444,12 +3062,12 @@ export default function App() {
                   </div>
                   <div className="flex items-center gap-2">
                     <button 
-                      onClick={() => requireAuth(() => {
+                      onClick={() => {
                         if (isSubmitting) return;
                         setEditingStore(store);
                         setStoreForm({ name: store.name, location: store.location || '' });
                         setIsStoreModalOpen(true);
-                      })}
+                      }}
                       disabled={isSubmitting}
                       className={cn(
                         "p-2 transition-colors",
@@ -3459,7 +3077,7 @@ export default function App() {
                       <Edit2 size={16} />
                     </button>
                     <button 
-                      onClick={() => !isSubmitting && requireAuth(() => handleDeleteStore(store.id))}
+                      onClick={() => !isSubmitting && handleDeleteStore(store.id)}
                       disabled={isSubmitting}
                       className={cn(
                         "p-2 transition-colors",
@@ -3474,7 +3092,6 @@ export default function App() {
             </div>
           </motion.div>
         )}
-
         {activeTab === 'help' && (
           <motion.div
             key="help"
@@ -3583,7 +3200,7 @@ export default function App() {
                 For technical issues or custom feature requests, contact your system administrator.
               </p>
               <div className="pt-4">
-                <p className="lethal-mono text-[10px] text-zinc-600 uppercase tracking-[0.2em]">Rowina finance • Version 1.0.0</p>
+                <p className="rowina-mono text-[10px] text-zinc-600 uppercase tracking-[0.2em]">Rowina Sales Tracker • Version 1.0.0</p>
               </div>
             </div>
           </motion.div>
