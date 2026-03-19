@@ -109,14 +109,14 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (request.auth.token.email == "richielwondo434@gmail.com" ||
+        ((request.auth.token.keys().contains('email') && request.auth.token.email.lower() == "richielwondo434@gmail.com" && request.auth.token.email_verified == true) ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive'));
     }
 
     function isEmployee() {
       return isAuthenticated() && 
-        (request.auth.token.email == "richielwondo434@gmail.com" ||
+        ((request.auth.token.keys().contains('email') && request.auth.token.email.lower() == "richielwondo434@gmail.com" && request.auth.token.email_verified == true) ||
          (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
           (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive' ||
            get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'employee')));
@@ -252,26 +252,26 @@ service cloud.firestore {
     // ===============================================================
 
     match /stores/{storeId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidStore(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /users/{userId} {
       // 1. Owner can always read their own doc (by UID or Email)
-      allow get: if isAuthenticated() && (request.auth.uid == userId || request.auth.token.email == userId);
+      allow get: if isAuthenticated() && (request.auth.uid == userId || request.auth.token.email.lower() == userId.lower());
       
       // 2. Allow reading if the document exists and email matches (for pre-auth checks)
-      allow get: if isAuthenticated() && resource != null && request.auth.token.email == resource.data.email;
+      allow get: if isAuthenticated() && resource != null && request.auth.token.email.lower() == resource.data.email.lower();
       
-      // 3. Admins can read any doc, but only call isAdmin if we're not checking the owner (to avoid recursion)
-      allow get: if isAuthenticated() && userId != request.auth.uid && userId != request.auth.token.email && isAdmin();
+      // 3. Admins can read any doc
+      allow get: if isAdmin();
       
       allow list: if isAdmin();
       
       allow create: if isAuthenticated() && (
         request.auth.uid == userId || 
-        request.auth.token.email == userId || 
+        request.auth.token.email.lower() == userId.lower() || 
         isAdmin()
       ) && isValidUser(request.resource.data) && (
         isAdmin() || request.resource.data.role == 'employee'
@@ -279,44 +279,44 @@ service cloud.firestore {
       
       allow update: if isAuthenticated() && (
         request.auth.uid == userId || 
-        request.auth.token.email == userId || 
+        request.auth.token.email.lower() == userId.lower() || 
         isAdmin()
       ) && isValidUser(request.resource.data) && 
-      request.resource.data.email == resource.data.email &&
+      request.resource.data.email.lower() == resource.data.email.lower() &&
       (isAdmin() || request.resource.data.role == resource.data.role);
       
       allow delete: if isAdmin();
     }
 
     match /products/{productId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidProduct(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /sales/{saleId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isEmployee() && isValidSale(request.resource.data);
       allow update: if isAdmin() && isValidSale(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /expenses/{expenseId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isEmployee() && isValidExpense(request.resource.data);
       allow update: if isAdmin() && isValidExpense(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /restocks/{restockId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isAdmin() && isValidRestock(request.resource.data);
       allow update: if isAdmin() && isValidRestock(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /clients/{clientId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isEmployee() && isValidClient(request.resource.data);
       allow update: if isEmployee() && isValidClient(request.resource.data) &&
                       request.resource.data.createdAt == resource.data.createdAt;
@@ -324,7 +324,7 @@ service cloud.firestore {
     }
 
     match /clientTransactions/{transactionId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isEmployee() && isValidClientTransaction(request.resource.data);
       allow update: if isAdmin() && isValidClientTransaction(request.resource.data) &&
                       request.resource.data.clientId == resource.data.clientId;
@@ -332,13 +332,13 @@ service cloud.firestore {
     }
 
     match /alertRules/{ruleId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidAlertRule(request.resource.data);
       allow delete: if isAdmin();
     }
 
     match /triggeredAlerts/{alertId} {
-      allow read: if true;
+      allow read: if isAuthenticated();
       allow create: if isEmployee() && isValidTriggeredAlert(request.resource.data);
       allow update: if isEmployee() && isValidTriggeredAlert(request.resource.data) &&
                       request.resource.data.ruleId == resource.data.ruleId &&

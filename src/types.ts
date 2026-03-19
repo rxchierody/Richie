@@ -108,14 +108,4 @@ export interface UserProfile {
   role: UserRole;
   displayName: string;
   assignedStoreIds?: string[];
-  subscriptionTier?: 'free' | 'pro' | 'enterprise';
-}
-
-export interface Subscription {
-  id: string;
-  name: string;
-  price: number;
-  interval: 'monthly' | 'yearly';
-  features: string[];
-  isPopular?: boolean;
 }

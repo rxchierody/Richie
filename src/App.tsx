@@ -31,7 +31,6 @@ import {
   Bell,
   AlertTriangle,
   CheckCircle,
-  Check,
   Activity,
   Users,
   CreditCard,
@@ -76,7 +75,7 @@ import {
   isToday,
   isValid
 } from 'date-fns';
-import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile, Subscription } from './types';
+import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile } from './types';
 import { cn, formatCurrency, calculateMarkup, calculateMargin, round, EAST_AFRICAN_CURRENCIES } from './lib/utils';
 import { auth, db } from './firebase';
 import { 
@@ -108,7 +107,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help' | 'subscriptions';
+type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 const COUNTRY_CODES = [
@@ -681,53 +680,6 @@ export default function App() {
     }
     action();
   };
-
-  const SUBSCRIPTION_PLANS: Subscription[] = [
-    {
-      id: 'free',
-      name: 'Starter',
-      price: 0,
-      interval: 'monthly',
-      features: [
-        'Up to 2 Stores',
-        'Basic Inventory Tracking',
-        'Sales Reports (Daily)',
-        'Email Support',
-        'PWA Installation'
-      ],
-      isPopular: false
-    },
-    {
-      id: 'pro',
-      name: 'Professional',
-      price: 29,
-      interval: 'monthly',
-      features: [
-        'Up to 10 Stores',
-        'Advanced Analytics',
-        'Staff Management',
-        'Client Ledger & Credit',
-        'Priority Support',
-        'Custom Alert Rules'
-      ],
-      isPopular: true
-    },
-    {
-      id: 'enterprise',
-      name: 'Enterprise',
-      price: 99,
-      interval: 'monthly',
-      features: [
-        'Unlimited Stores',
-        'Multi-user Roles',
-        'API Access',
-        'Dedicated Account Manager',
-        'Custom Integrations',
-        'White-label Reports'
-      ],
-      isPopular: false
-    }
-  ];
 
   const getDayStats = (date: Date) => {
     const dateStr = format(date, 'yyyy-MM-dd');
@@ -2297,7 +2249,6 @@ export default function App() {
           { id: 'alerts', label: 'ALERTS' },
           { id: 'staff', label: 'STAFF' },
           { id: 'stores', label: 'STORES' },
-          { id: 'subscriptions', label: 'SUBSCRIPTIONS' },
           { id: 'security', label: 'SECURITY' },
           { id: 'help', label: 'HELP' },
         ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores')).map((tab) => (
@@ -3522,73 +3473,6 @@ export default function App() {
               ))}
             </div>
           </motion.div>
-        )}
-        {activeTab === 'subscriptions' && (
-          <div className="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-            <div className="text-center space-y-2">
-              <h2 className="text-3xl font-bold text-white">Choose Your Plan</h2>
-              <p className="text-rowina-gray">Unlock advanced features and scale your business with Rowina.</p>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-6xl mx-auto px-4">
-              {SUBSCRIPTION_PLANS.map((plan) => (
-                <div 
-                  key={plan.id}
-                  className={`relative p-8 rounded-2xl border transition-all duration-300 hover:scale-[1.02] ${
-                    plan.isPopular 
-                      ? 'bg-rowina-blue/10 border-rowina-blue shadow-[0_0_20px_rgba(59,130,246,0.2)]' 
-                      : 'bg-rowina-black/40 border-white/10 hover:border-white/20'
-                  }`}
-                >
-                  {plan.isPopular && (
-                    <div className="absolute -top-4 left-1/2 -translate-x-1/2 bg-rowina-blue text-white text-xs font-bold px-4 py-1 rounded-full">
-                      MOST POPULAR
-                    </div>
-                  )}
-
-                  <div className="space-y-4">
-                    <div>
-                      <h3 className="text-xl font-bold text-white">{plan.name}</h3>
-                      <div className="mt-2 flex items-baseline gap-1">
-                        <span className="text-4xl font-bold text-white">${plan.price}</span>
-                        <span className="text-rowina-gray">/{plan.interval}</span>
-                      </div>
-                    </div>
-
-                    <ul className="space-y-3 py-6">
-                      {plan.features.map((feature, i) => (
-                        <li key={i} className="flex items-start gap-3 text-sm text-rowina-gray">
-                          <Check className="w-4 h-4 text-rowina-blue shrink-0 mt-0.5" />
-                          <span>{feature}</span>
-                        </li>
-                      ))}
-                    </ul>
-
-                    <button
-                      onClick={() => requireAuth(() => {
-                        // Here we would integrate with a payment gateway
-                        console.log(`Redirecting to payment for ${plan.name} plan...`);
-                      })}
-                      className={`w-full py-3 rounded-xl font-bold transition-all ${
-                        plan.isPopular
-                          ? 'bg-rowina-blue text-white hover:bg-blue-600 shadow-lg shadow-blue-500/20'
-                          : 'bg-white/10 text-white hover:bg-white/20'
-                      } ${userProfile?.subscriptionTier === plan.id ? 'opacity-50 cursor-default' : ''}`}
-                      disabled={userProfile?.subscriptionTier === plan.id}
-                    >
-                      {userProfile?.subscriptionTier === plan.id ? 'Current Plan' : `Get ${plan.name}`}
-                    </button>
-                  </div>
-                </div>
-              ))}
-            </div>
-
-            <div className="bg-rowina-blue/5 border border-rowina-blue/20 rounded-2xl p-8 max-w-4xl mx-auto text-center space-y-4">
-              <h3 className="text-xl font-bold text-white">Need a Custom Enterprise Solution?</h3>
-              <p className="text-rowina-gray">We offer tailored plans for large organizations with complex multi-store requirements.</p>
-              <button className="text-rowina-blue font-bold hover:underline">Contact Sales Support</button>
-            </div>
-          </div>
         )}
 
         {activeTab === 'help' && (
