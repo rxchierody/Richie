@@ -23,6 +23,7 @@ import {
   Search as SearchIcon,
   MessageCircle,
   LogOut,
+  LogIn,
   HelpCircle,
   Package,
   ShoppingCart,
@@ -263,7 +264,7 @@ export default function App() {
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
-  const [showAuthScreen, setShowAuthScreen] = useState(false);
+  const [showAuthScreen, setShowAuthScreen] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
@@ -461,54 +462,76 @@ export default function App() {
   // Auth and User Profile Sync
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
-      setUser(currentUser);
-      if (currentUser) {
-        // Sync user profile/role
-        const userDocRef = doc(db, 'users', currentUser.uid);
-        const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
-        
-        try {
-          const userDoc = await getDoc(userDocRef);
-          if (userDoc.exists()) {
-            const data = userDoc.data() as UserProfile;
-            setUserProfile({ ...data, id: userDoc.id });
-            setUserRole(data.role);
-          } else {
-            // Check if there's a pre-authorized role by email
-            const emailDoc = await getDoc(emailDocRef);
-            let role: UserRole = currentUser.email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
-            let displayName = currentUser.displayName || '';
-            let assignedStoreIds: string[] = [];
+      try {
+        setUser(currentUser);
+        if (currentUser) {
+          // Sync user profile/role
+          const userDocRef = doc(db, 'users', currentUser.uid);
+          const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
+          
+          try {
+            const userDoc = await getDoc(userDocRef);
+            if (userDoc.exists()) {
+              const data = userDoc.data() as UserProfile;
+              setUserProfile({ ...data, id: userDoc.id });
+              setUserRole(data.role);
+            } else {
+              // Check if there's a pre-authorized role by email
+              // We use a try-catch here because the email-based doc might not exist 
+              // and rules might deny access if it doesn't exist
+              let emailDocData: UserProfile | null = null;
+              try {
+                const emailDoc = await getDoc(emailDocRef);
+                if (emailDoc.exists()) {
+                  emailDocData = emailDoc.data() as UserProfile;
+                }
+              } catch (e) {
+                console.warn("Email-based profile check failed (expected for new users):", e);
+              }
 
-            if (emailDoc.exists()) {
-              const data = emailDoc.data() as UserProfile;
-              role = data.role;
-              displayName = data.displayName || displayName;
-              assignedStoreIds = data.assignedStoreIds || [];
-              // Delete the temporary email-based doc
-              await deleteDoc(emailDocRef);
+              let role: UserRole = currentUser.email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
+              let displayName = currentUser.displayName || '';
+              let assignedStoreIds: string[] = [];
+
+              if (emailDocData) {
+                role = emailDocData.role;
+                displayName = emailDocData.displayName || displayName;
+                assignedStoreIds = emailDocData.assignedStoreIds || [];
+                // Delete the temporary email-based doc
+                try {
+                  await deleteDoc(emailDocRef);
+                } catch (e) {
+                  console.error("Failed to delete temp email doc:", e);
+                }
+              }
+
+              // Create the permanent UID-based doc
+              const newProfile: UserProfile = {
+                id: currentUser.uid,
+                email: currentUser.email || '',
+                role: role,
+                displayName: displayName,
+                assignedStoreIds: assignedStoreIds
+              };
+              await setDoc(userDocRef, newProfile);
+              setUserProfile(newProfile);
+              setUserRole(role);
             }
-
-            // Create the permanent UID-based doc
-            const newProfile: UserProfile = {
-              id: currentUser.uid,
-              email: currentUser.email || '',
-              role: role,
-              displayName: displayName,
-              assignedStoreIds: assignedStoreIds
-            };
-            await setDoc(userDocRef, newProfile);
-            setUserProfile(newProfile);
-            setUserRole(role);
+          } catch (error) {
+            console.error("Profile sync error:", error);
+            // Don't block the app if profile sync fails, but log it
+            // We still want to allow them in as a basic user if possible
+            setUserRole('employee');
           }
-        } catch (error) {
-          handleFirestoreError(error, OperationType.GET, `users/${currentUser.uid}`);
+        } else {
+          setUserRole('employee');
+          setUserProfile(null);
         }
-      } else {
-        setUserRole('employee');
-        setUserProfile(null);
+      } catch (globalAuthError) {
+        console.error("Global auth error:", globalAuthError);
+      } finally {
+        setIsAuthReady(true);
       }
-      setIsAuthReady(true);
     });
     return () => unsubscribe();
   }, []);
@@ -1379,11 +1402,22 @@ export default function App() {
     setLoginError(null);
     try {
       const provider = new GoogleAuthProvider();
+      // In PWA/Standalone mode, popups are often blocked. 
+      // We could use redirect, but it requires more config.
+      // For now, we'll try popup and provide a better error if it fails.
       await signInWithPopup(auth, provider);
     } catch (error: any) {
-      if (error.code !== 'auth/cancelled-popup-request' && error.code !== 'auth/popup-closed-by-user') {
-        console.error("Login failed:", error);
-        setLoginError("GOOGLE SIGN-IN FAILED");
+      console.error("Login error details:", error);
+      if (error.code === 'auth/popup-blocked') {
+        setLoginError("POPUP BLOCKED. PLEASE ALLOW POPUPS OR USE EMAIL.");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        setLoginError("UNAUTHORIZED DOMAIN. PLEASE ADD TO FIREBASE CONSOLE.");
+      } else if (isStandalone) {
+        setLoginError("GOOGLE SIGN-IN IS RESTRICTED IN PWA MODE. PLEASE USE EMAIL.");
+      } else if (error.code === 'auth/cancelled-popup-request' || error.code === 'auth/popup-closed-by-user') {
+        // User closed the popup, no need for error message
+      } else {
+        setLoginError("GOOGLE SIGN-IN FAILED. TRY EMAIL.");
       }
     } finally {
       setIsLoggingIn(false);
@@ -1759,6 +1793,14 @@ export default function App() {
               CONTINUE WITH GOOGLE
             </button>
 
+            {isStandalone && (
+              <p className="text-[8px] rowina-mono text-zinc-500 uppercase text-center tracking-widest leading-relaxed">
+                {isIOS 
+                  ? "Note: Google Sign-in may be restricted in iOS Standalone mode. Use Email/Phone if issues persist."
+                  : "Note: If Google Sign-in fails, ensure popups are allowed or use Email/Phone authentication."}
+              </p>
+            )}
+
             <div className="pt-2 flex flex-col gap-4">
               <button 
                 onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
@@ -1942,13 +1984,23 @@ export default function App() {
             >
               <HelpCircle size={24} />
             </button>
-            <button 
-              onClick={handleLogout}
-              className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-rowina-blue hover:border-rowina-blue transition-all"
-              title="Logout"
-            >
-              <LogOut size={24} />
-            </button>
+            {user ? (
+              <button 
+                onClick={handleLogout}
+                className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-zinc-500 hover:text-rowina-blue hover:border-rowina-blue transition-all"
+                title="Logout"
+              >
+                <LogOut size={24} />
+              </button>
+            ) : (
+              <button 
+                onClick={() => setShowAuthScreen(true)}
+                className="w-12 h-12 rounded-full border border-zinc-800 flex items-center justify-center text-rowina-blue border-rowina-blue animate-pulse transition-all"
+                title="Login"
+              >
+                <LogIn size={24} />
+              </button>
+            )}
           </div>
         </div>
       </header>

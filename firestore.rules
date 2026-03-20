@@ -267,7 +267,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if isOwner(userId) || isAdmin() || (isAuthenticated() && request.auth.token.email == resource.data.email);
+      allow get: if isOwner(userId) || isAdmin() || (isAuthenticated() && (userId == request.auth.token.email || userId == request.auth.token.email.lower()));
       allow list: if isAdmin();
       allow create: if (isOwner(userId) || isAdmin()) && isValidUser(request.resource.data) && 
                       (isAdmin() || request.resource.data.role == 'employee');
