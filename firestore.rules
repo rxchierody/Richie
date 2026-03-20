@@ -141,20 +141,25 @@ service cloud.firestore {
       return request.resource.data.keys().hasAll(requiredFields);
     }
 
+    function userIdUnchanged() {
+      return !('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId;
+    }
+
     // ===============================================================
     // Domain Validators
     // ===============================================================
 
     function isValidStore(data) {
-      return hasOnlyAllowedFields(['name', 'location', 'createdAt']) &&
-        hasRequiredFields(['name', 'createdAt']) &&
+      return hasOnlyAllowedFields(['userId', 'name', 'location', 'createdAt']) &&
+        hasRequiredFields(['userId', 'name', 'createdAt']) &&
+        data.userId == request.auth.uid &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         (!('location' in data) || (data.location is string && data.location.size() <= 200)) &&
         isValidDateString(data.createdAt);
     }
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds']) &&
+      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id']) &&
         hasRequiredFields(['email', 'role']) &&
         data.email is string && isValidEmail(data.email) && data.email.size() <= 100 &&
         data.role in ['executive', 'employee'] &&
@@ -163,8 +168,9 @@ service cloud.firestore {
     }
 
     function isValidProduct(data) {
-      return hasOnlyAllowedFields(['storeId', 'name', 'category', 'unit', 'stockQuantity', 'buyingPrice', 'sellingPrice']) &&
-        hasRequiredFields(['storeId', 'name', 'stockQuantity', 'buyingPrice', 'sellingPrice']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'category', 'unit', 'stockQuantity', 'buyingPrice', 'sellingPrice']) &&
+        hasRequiredFields(['userId', 'storeId', 'name', 'stockQuantity', 'buyingPrice', 'sellingPrice']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         (!('category' in data) || (data.category is string && data.category.size() <= 50)) &&
@@ -175,8 +181,9 @@ service cloud.firestore {
     }
 
     function isValidSale(data) {
-      return hasOnlyAllowedFields(['storeId', 'date', 'productId', 'quantity', 'sellingPrice', 'buyingPrice', 'discount', 'paymentMethod']) &&
-        hasRequiredFields(['storeId', 'date', 'productId', 'quantity', 'sellingPrice', 'buyingPrice', 'paymentMethod']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'date', 'productId', 'quantity', 'sellingPrice', 'buyingPrice', 'discount', 'paymentMethod']) &&
+        hasRequiredFields(['userId', 'storeId', 'date', 'productId', 'quantity', 'sellingPrice', 'buyingPrice', 'paymentMethod']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         isValidDateString(data.date) &&
         data.productId is string &&
@@ -188,8 +195,9 @@ service cloud.firestore {
     }
 
     function isValidExpense(data) {
-      return hasOnlyAllowedFields(['storeId', 'date', 'description', 'category', 'amount']) &&
-        hasRequiredFields(['storeId', 'date', 'description', 'category', 'amount']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'date', 'description', 'category', 'amount']) &&
+        hasRequiredFields(['userId', 'storeId', 'date', 'description', 'category', 'amount']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         isValidDateString(data.date) &&
         data.description is string && data.description.size() > 0 && data.description.size() <= 200 &&
@@ -198,8 +206,9 @@ service cloud.firestore {
     }
 
     function isValidRestock(data) {
-      return hasOnlyAllowedFields(['storeId', 'date', 'productId', 'quantity', 'unitCost']) &&
-        hasRequiredFields(['storeId', 'date', 'productId', 'quantity', 'unitCost']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'date', 'productId', 'quantity', 'unitCost']) &&
+        hasRequiredFields(['userId', 'storeId', 'date', 'productId', 'quantity', 'unitCost']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         isValidDateString(data.date) &&
         data.productId is string &&
@@ -208,8 +217,9 @@ service cloud.firestore {
     }
 
     function isValidClient(data) {
-      return hasOnlyAllowedFields(['storeId', 'name', 'phone', 'email', 'totalDebt', 'createdAt']) &&
-        hasRequiredFields(['storeId', 'name', 'phone', 'totalDebt', 'createdAt']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'phone', 'email', 'totalDebt', 'createdAt']) &&
+        hasRequiredFields(['userId', 'storeId', 'name', 'phone', 'totalDebt', 'createdAt']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         data.phone is string && data.phone.size() <= 20 &&
@@ -219,8 +229,9 @@ service cloud.firestore {
     }
 
     function isValidClientTransaction(data) {
-      return hasOnlyAllowedFields(['storeId', 'clientId', 'date', 'type', 'amount', 'description', 'productId', 'quantity']) &&
-        hasRequiredFields(['storeId', 'clientId', 'date', 'type', 'amount', 'description']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'clientId', 'date', 'type', 'amount', 'description', 'productId', 'quantity']) &&
+        hasRequiredFields(['userId', 'storeId', 'clientId', 'date', 'type', 'amount', 'description']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         data.clientId is string &&
         isValidDateString(data.date) &&
@@ -230,8 +241,9 @@ service cloud.firestore {
     }
 
     function isValidAlertRule(data) {
-      return hasOnlyAllowedFields(['storeId', 'name', 'type', 'targetId', 'threshold', 'isActive', 'createdAt']) &&
-        hasRequiredFields(['storeId', 'name', 'type', 'threshold', 'isActive', 'createdAt']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'type', 'targetId', 'threshold', 'isActive', 'createdAt']) &&
+        hasRequiredFields(['userId', 'storeId', 'name', 'type', 'threshold', 'isActive', 'createdAt']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         data.type is string && data.type.size() <= 50 &&
@@ -241,8 +253,9 @@ service cloud.firestore {
     }
 
     function isValidTriggeredAlert(data) {
-      return hasOnlyAllowedFields(['storeId', 'ruleId', 'message', 'timestamp', 'isRead']) &&
-        hasRequiredFields(['storeId', 'ruleId', 'message', 'timestamp', 'isRead']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'ruleId', 'message', 'timestamp', 'isRead']) &&
+        hasRequiredFields(['userId', 'storeId', 'ruleId', 'message', 'timestamp', 'isRead']) &&
+        data.userId == request.auth.uid &&
         data.storeId is string &&
         data.ruleId is string &&
         data.message is string && data.message.size() <= 500 &&
@@ -261,9 +274,10 @@ service cloud.firestore {
     // ===============================================================
 
     match /stores/{storeId} {
-      allow read: if true;
-      allow create, update: if isAdmin() && isValidStore(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidStore(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidStore(request.resource.data) && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /users/{userId} {
@@ -278,61 +292,63 @@ service cloud.firestore {
     }
 
     match /products/{productId} {
-      allow read: if true;
-      allow create, update: if isAdmin() && isValidProduct(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidProduct(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidProduct(request.resource.data) && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /sales/{saleId} {
-      allow read: if true;
-      allow create: if isEmployee() && isValidSale(request.resource.data);
-      allow update: if isAdmin() && isValidSale(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidSale(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidSale(request.resource.data) && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /expenses/{expenseId} {
-      allow read: if true;
-      allow create: if isEmployee() && isValidExpense(request.resource.data);
-      allow update: if isAdmin() && isValidExpense(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidExpense(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidExpense(request.resource.data) && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /restocks/{restockId} {
-      allow read: if true;
-      allow create: if isAdmin() && isValidRestock(request.resource.data);
-      allow update: if isAdmin() && isValidRestock(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidRestock(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidRestock(request.resource.data) && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /clients/{clientId} {
-      allow read: if true;
-      allow create: if isEmployee() && isValidClient(request.resource.data);
-      allow update: if isEmployee() && isValidClient(request.resource.data) &&
-                      request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidClient(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidClient(request.resource.data) &&
+                      request.resource.data.createdAt == resource.data.createdAt && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /clientTransactions/{transactionId} {
-      allow read: if true;
-      allow create: if isEmployee() && isValidClientTransaction(request.resource.data);
-      allow update: if isAdmin() && isValidClientTransaction(request.resource.data) &&
-                      request.resource.data.clientId == resource.data.clientId;
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidClientTransaction(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidClientTransaction(request.resource.data) &&
+                      request.resource.data.clientId == resource.data.clientId && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /alertRules/{ruleId} {
-      allow read: if true;
-      allow create, update: if isAdmin() && isValidAlertRule(request.resource.data);
-      allow delete: if isAdmin();
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidAlertRule(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidAlertRule(request.resource.data) && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /triggeredAlerts/{alertId} {
-      allow read: if true;
-      allow create: if isEmployee() && isValidTriggeredAlert(request.resource.data);
-      allow update: if isEmployee() && isValidTriggeredAlert(request.resource.data) &&
+      allow read: if isOwner(resource.data.userId);
+      allow create: if isAuthenticated() && isValidTriggeredAlert(request.resource.data);
+      allow update: if isOwner(resource.data.userId) && isValidTriggeredAlert(request.resource.data) &&
                       request.resource.data.ruleId == resource.data.ruleId &&
-                      request.resource.data.timestamp == resource.data.timestamp;
-      allow delete: if isAdmin();
+                      request.resource.data.timestamp == resource.data.timestamp && userIdUnchanged();
+      allow delete: if isOwner(resource.data.userId);
     }
 
     match /settings/global {

@@ -5,17 +5,19 @@
       "description": "Store locations",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "name": { "type": "string" },
         "location": { "type": "string" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["name", "createdAt"]
+      "required": ["userId", "name", "createdAt"]
     },
     "Product": {
       "title": "Product",
       "description": "Inventory items",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "name": { "type": "string" },
         "category": { "type": "string" },
@@ -24,13 +26,14 @@
         "buyingPrice": { "type": "number" },
         "sellingPrice": { "type": "number" }
       },
-      "required": ["storeId", "name", "stockQuantity", "buyingPrice", "sellingPrice"]
+      "required": ["userId", "storeId", "name", "stockQuantity", "buyingPrice", "sellingPrice"]
     },
     "Sale": {
       "title": "Sale",
       "description": "Sales transactions",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
         "productId": { "type": "string" },
@@ -40,39 +43,42 @@
         "discount": { "type": "number" },
         "paymentMethod": { "type": "string" }
       },
-      "required": ["storeId", "date", "productId", "quantity", "sellingPrice", "buyingPrice", "paymentMethod"]
+      "required": ["userId", "storeId", "date", "productId", "quantity", "sellingPrice", "buyingPrice", "paymentMethod"]
     },
     "Expense": {
       "title": "Expense",
       "description": "Operational expenses",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
         "description": { "type": "string" },
         "category": { "type": "string" },
         "amount": { "type": "number" }
       },
-      "required": ["storeId", "date", "description", "category", "amount"]
+      "required": ["userId", "storeId", "date", "description", "category", "amount"]
     },
     "Restock": {
       "title": "Restock",
       "description": "Inventory restock events",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
         "productId": { "type": "string" },
         "quantity": { "type": "number" },
         "unitCost": { "type": "number" }
       },
-      "required": ["storeId", "date", "productId", "quantity", "unitCost"]
+      "required": ["userId", "storeId", "date", "productId", "quantity", "unitCost"]
     },
     "Client": {
       "title": "Client",
       "description": "Customer information and debt tracking",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "name": { "type": "string" },
         "phone": { "type": "string" },
@@ -80,13 +86,14 @@
         "totalDebt": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["storeId", "name", "phone", "totalDebt", "createdAt"]
+      "required": ["userId", "storeId", "name", "phone", "totalDebt", "createdAt"]
     },
     "ClientTransaction": {
       "title": "ClientTransaction",
       "description": "Ledger entries for clients",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "clientId": { "type": "string" },
         "date": { "type": "string", "format": "date" },
@@ -96,13 +103,14 @@
         "productId": { "type": "string" },
         "quantity": { "type": "number" }
       },
-      "required": ["storeId", "clientId", "date", "type", "amount", "description"]
+      "required": ["userId", "storeId", "clientId", "date", "type", "amount", "description"]
     },
     "AlertRule": {
       "title": "AlertRule",
       "description": "Rules for triggering alerts",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "name": { "type": "string" },
         "type": { "type": "string" },
@@ -111,20 +119,21 @@
         "isActive": { "type": "boolean" },
         "createdAt": { "type": "string", "format": "date-time" }
       },
-      "required": ["storeId", "name", "type", "threshold", "isActive", "createdAt"]
+      "required": ["userId", "storeId", "name", "type", "threshold", "isActive", "createdAt"]
     },
     "TriggeredAlert": {
       "title": "TriggeredAlert",
       "description": "Alerts that have been fired",
       "type": "object",
       "properties": {
+        "userId": { "type": "string" },
         "storeId": { "type": "string" },
         "ruleId": { "type": "string" },
         "message": { "type": "string" },
         "timestamp": { "type": "string", "format": "date-time" },
         "isRead": { "type": "boolean" }
       },
-      "required": ["storeId", "ruleId", "message", "timestamp", "isRead"]
+      "required": ["userId", "storeId", "ruleId", "message", "timestamp", "isRead"]
     },
     "UserProfile": {
       "title": "UserProfile",

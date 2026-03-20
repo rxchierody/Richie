@@ -4,6 +4,7 @@ export type PaymentMethod = 'Cash' | 'Credit' | 'Mobile Money Transfer' | 'Chequ
 
 export interface Store {
   id: string;
+  userId: string;
   name: string;
   location?: string;
   createdAt: string;
@@ -11,6 +12,7 @@ export interface Store {
 
 export interface Product {
   id: string;
+  userId: string;
   storeId: string;
   name: string;
   category: string;
@@ -22,6 +24,7 @@ export interface Product {
 
 export interface Sale {
   id: string;
+  userId: string;
   storeId: string;
   date: string;
   productId: string;
@@ -34,6 +37,7 @@ export interface Sale {
 
 export interface Expense {
   id: string;
+  userId: string;
   storeId: string;
   date: string;
   description: string;
@@ -43,6 +47,7 @@ export interface Expense {
 
 export interface Restock {
   id: string;
+  userId: string;
   storeId: string;
   date: string;
   productId: string;
@@ -61,6 +66,7 @@ export type UserRole = 'executive' | 'employee';
 
 export interface AlertRule {
   id: string;
+  userId: string;
   storeId: string;
   name: string;
   type: AlertType;
@@ -72,6 +78,7 @@ export interface AlertRule {
 
 export interface TriggeredAlert {
   id: string;
+  userId: string;
   storeId: string;
   ruleId: string;
   message: string;
@@ -81,6 +88,7 @@ export interface TriggeredAlert {
 
 export interface Client {
   id: string;
+  userId: string;
   storeId: string;
   name: string;
   phone: string;
@@ -91,6 +99,7 @@ export interface Client {
 
 export interface ClientTransaction {
   id: string;
+  userId: string;
   clientId: string;
   storeId: string;
   date: string;

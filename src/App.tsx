@@ -540,7 +540,7 @@ export default function App() {
   useEffect(() => {
     if (!isAuthReady) return;
 
-    const unsubStores = onSnapshot(collection(db, 'stores'), (snapshot) => {
+    const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', user?.uid)), (snapshot) => {
       const storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
       setStores(storesData);
       
@@ -555,11 +555,11 @@ export default function App() {
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'stores'));
 
     const getQuery = (colName: string) => {
-      let baseQuery = collection(db, colName);
+      let baseQuery = query(collection(db, colName), where('userId', '==', user?.uid));
       if (selectedStoreId !== 'ALL') {
         return query(baseQuery, where('storeId', '==', selectedStoreId));
       }
-      return query(baseQuery);
+      return baseQuery;
     };
 
     const unsubProducts = onSnapshot(getQuery('products'), (snapshot) => {
@@ -732,6 +732,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
+              userId: user?.uid || '',
               storeId: alert.storeId,
               ruleId: alert.id,
               message: `CRITICAL: ${product.name} stock reached ${product.stockQuantity} (Threshold: ${alert.threshold})`,
@@ -747,6 +748,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
+              userId: user?.uid || '',
               storeId: alert.storeId,
               ruleId: alert.id,
               message: `OBJECTIVE REACHED: Sales target of ${f(alert.threshold)} achieved! Current: ${f(totalSales)}`,
@@ -761,6 +763,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
+              userId: user?.uid || '',
               storeId: alert.storeId,
               ruleId: alert.id,
               message: `MARGIN ALERT: Current profit margin (${stats.current.margin.toFixed(1)}%) is below threshold (${alert.threshold}%)`,
@@ -783,6 +786,7 @@ export default function App() {
             if (!alreadyTriggered) {
               newTriggered.push({
                 id: Math.random().toString(36).substr(2, 9),
+                userId: user?.uid || '',
                 storeId: alert.storeId,
                 ruleId: alert.id,
                 message: `VELOCITY ALERT: ${product.name} is selling fast! ${productSalesLast24h} units sold in last 24h.`,
@@ -843,6 +847,7 @@ export default function App() {
       const { id, ...data } = productForm;
       const payload = {
         ...data,
+        userId: user?.uid,
         storeId,
         stockQuantity: productForm.stockQuantity || 0,
         buyingPrice: productForm.buyingPrice || 0,
@@ -882,6 +887,7 @@ export default function App() {
       const newSaleDocRef = doc(collection(db, 'sales'));
       const saleData = { 
         ...saleForm, 
+        userId: user?.uid,
         storeId,
         quantity: saleForm.quantity || 0,
         discount: saleForm.discount || 0,
@@ -921,6 +927,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       await setDoc(newDocRef, { 
         ...expenseForm, 
+        userId: user?.uid,
         storeId,
         amount: expenseForm.amount || 0
       });
@@ -949,6 +956,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       await setDoc(newDocRef, { 
         ...restockForm, 
+        userId: user?.uid,
         storeId,
         quantity: restockForm.quantity || 0,
         unitCost: restockForm.unitCost || product.buyingPrice 
@@ -982,6 +990,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       await setDoc(newDocRef, { 
         ...alertForm, 
+        userId: user?.uid,
         storeId,
         threshold: alertForm.threshold || 0,
         createdAt: new Date().toISOString()
@@ -1017,6 +1026,7 @@ export default function App() {
         const newDocRef = doc(colRef);
         await setDoc(newDocRef, {
           ...clientForm,
+          userId: user?.uid,
           storeId,
           totalDebt: clientForm.totalDebt || 0,
           createdAt: new Date().toISOString()
@@ -1079,6 +1089,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       const transactionData = {
         ...clientTransactionForm,
+        userId: user?.uid,
         storeId,
         amount: clientTransactionForm.amount || 0,
         clientId: selectedClient.id
@@ -1148,7 +1159,11 @@ export default function App() {
       } else {
         const colRef = collection(db, 'stores');
         const newDocRef = doc(colRef);
-        await setDoc(newDocRef, { ...storeForm, createdAt: new Date().toISOString() });
+        await setDoc(newDocRef, { 
+          ...storeForm, 
+          userId: user?.uid,
+          createdAt: new Date().toISOString() 
+        });
       }
       setStoreForm({ name: '', location: '' });
       setIsStoreModalOpen(false);
