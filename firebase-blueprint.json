@@ -137,6 +137,15 @@
         "assignedStoreIds": { "type": "array", "items": { "type": "string" } }
       },
       "required": ["email", "role"]
+    },
+    "SystemSettings": {
+      "title": "SystemSettings",
+      "description": "Global application settings",
+      "type": "object",
+      "properties": {
+        "executivePassword": { "type": "string" }
+      },
+      "required": ["executivePassword"]
     }
   },
   "firestore": {
@@ -179,6 +188,10 @@
     "/users/{userId}": {
       "schema": "UserProfile",
       "description": "User profiles and roles"
+    },
+    "/settings/global": {
+      "schema": "SystemSettings",
+      "description": "Global settings document"
     }
   }
 }

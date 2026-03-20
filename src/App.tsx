@@ -270,6 +270,7 @@ export default function App() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
+  const [executivePassword, setExecutivePassword] = useState<string>('admin123');
   const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('rowina_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
 
@@ -287,6 +288,8 @@ export default function App() {
   });
   const [lockInput, setLockInput] = useState('');
   const [lockError, setLockError] = useState<string | null>(null);
+  const [newExecPassword, setNewExecPassword] = useState('');
+  const [isUpdatingExecPassword, setIsUpdatingExecPassword] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('rowina_lock_config', JSON.stringify(appLockConfig));
@@ -331,7 +334,7 @@ export default function App() {
   const [authModal, setAuthModal] = useState<{
     isOpen: boolean;
     targetRole: UserRole | null;
-    password: '';
+    password: string;
     error: string;
   }>({
     isOpen: false,
@@ -349,6 +352,7 @@ export default function App() {
   const [isClientTransactionModalOpen, setIsClientTransactionModalOpen] = useState(false);
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
+  const [isSupportModalOpen, setIsSupportModalOpen] = useState(false);
   
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editingClient, setEditingClient] = useState<Client | null>(null);
@@ -375,6 +379,7 @@ export default function App() {
   const [productsSearch, setProductsSearch] = useState('');
   const [clientsSearch, setClientsSearch] = useState('');
   const [staffSearch, setStaffSearch] = useState('');
+  const [alertsSearch, setAlertsSearch] = useState('');
 
   const [staff, setStaff] = useState<{ id: string; email: string; role: UserRole; displayName?: string }[]>([]);
 
@@ -570,6 +575,16 @@ export default function App() {
       setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
+    const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
+      if (snapshot.exists()) {
+        setExecutivePassword(snapshot.data().executivePassword);
+      } else if (userRole === 'executive') {
+        // Initialize if not exists
+        setDoc(doc(db, 'settings', 'global'), { executivePassword: 'admin123' })
+          .catch(err => console.error("Failed to init settings:", err));
+      }
+    }, (err) => handleFirestoreError(err, OperationType.GET, 'settings/global'));
+
     return () => {
       unsubStores();
       unsubProducts();
@@ -581,6 +596,7 @@ export default function App() {
       unsubAlerts();
       unsubTriggered();
       unsubStaff();
+      unsubSettings();
     };
   }, [isAuthReady, user, selectedStoreId, userRole]);
 
@@ -790,6 +806,12 @@ export default function App() {
       if (!productForm.name) {
         throw new Error("Product Name is required.");
       }
+      if ((productForm.buyingPrice || 0) < 0 || (productForm.sellingPrice || 0) < 0) {
+        throw new Error("Prices cannot be negative.");
+      }
+      if ((productForm.stockQuantity || 0) < 0) {
+        throw new Error("Initial stock cannot be negative.");
+      }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
@@ -828,11 +850,13 @@ export default function App() {
     if (!product) return;
     setIsSubmitting(true);
     try {
+      if (!saleForm.productId) throw new Error("Please select a product.");
+      if (!saleForm.quantity || saleForm.quantity <= 0) throw new Error("Quantity must be greater than 0.");
+      if (saleForm.quantity > product.stockQuantity) throw new Error(`Insufficient stock. Available: ${product.stockQuantity}`);
+
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
-
-      const saleColRef = collection(db, 'sales');
-      const newSaleDocRef = doc(saleColRef);
+      const newSaleDocRef = doc(collection(db, 'sales'));
       const saleData = { 
         ...saleForm, 
         storeId,
@@ -864,6 +888,9 @@ export default function App() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      if (!expenseForm.amount || expenseForm.amount <= 0) throw new Error("Amount must be greater than 0.");
+      if (!expenseForm.description) throw new Error("Description is required.");
+
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
@@ -889,6 +916,9 @@ export default function App() {
     if (!product) return;
     setIsSubmitting(true);
     try {
+      if (!restockForm.quantity || restockForm.quantity <= 0) throw new Error("Quantity must be greater than 0.");
+      if (restockForm.unitCost && restockForm.unitCost < 0) throw new Error("Unit cost cannot be negative.");
+
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
@@ -919,6 +949,9 @@ export default function App() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      if (!alertForm.name) throw new Error("Alert name is required.");
+      if (alertForm.threshold === undefined || alertForm.threshold < 0) throw new Error("Threshold must be 0 or greater.");
+
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
@@ -943,6 +976,8 @@ export default function App() {
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
+      if (!clientForm.name) throw new Error("Client name is required.");
+
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
@@ -982,7 +1017,15 @@ export default function App() {
         if (isSubmitting) return;
         setIsSubmitting(true);
         try {
-          await deleteDoc(doc(db, 'clients', clientId));
+          const batch = writeBatch(db);
+          batch.delete(doc(db, 'clients', clientId));
+          
+          // Delete related transactions
+          clientTransactions.filter(t => t.clientId === clientId).forEach(t => {
+            batch.delete(doc(db, 'clientTransactions', t.id));
+          });
+
+          await batch.commit();
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err) {
           handleFirestoreError(err, OperationType.DELETE, `clients/${clientId}`);
@@ -998,6 +1041,14 @@ export default function App() {
     if (!selectedClient) return;
     setIsSubmitting(true);
     try {
+      if (!clientTransactionForm.amount || clientTransactionForm.amount <= 0) throw new Error("Amount must be greater than 0.");
+      if (clientTransactionForm.type === 'CREDIT' && clientTransactionForm.productId) {
+        const product = products.find(p => p.id === clientTransactionForm.productId);
+        if (product && (clientTransactionForm.quantity || 0) > product.stockQuantity) {
+          throw new Error(`Insufficient stock. Available: ${product.stockQuantity}`);
+        }
+      }
+
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
@@ -1153,15 +1204,62 @@ export default function App() {
     setConfirmModal({
       isOpen: true,
       title: 'DELETE PRODUCT',
-      message: 'Are you sure you want to delete this product? This will remove it from the inventory permanently.',
+      message: 'Are you sure you want to delete this product? This will remove it from the inventory permanently along with its history.',
       onConfirm: async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
         try {
-          await deleteDoc(doc(db, 'products', productId));
+          const batch = writeBatch(db);
+          batch.delete(doc(db, 'products', productId));
+          
+          // Delete related sales and restocks
+          sales.filter(s => s.productId === productId).forEach(s => batch.delete(doc(db, 'sales', s.id)));
+          restocks.filter(r => r.productId === productId).forEach(r => batch.delete(doc(db, 'restocks', r.id)));
+
+          await batch.commit();
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err) {
           handleFirestoreError(err, OperationType.DELETE, `products/${productId}`);
+        } finally {
+          setIsSubmitting(false);
+        }
+      }
+    });
+  };
+
+  const handleMarkAllAlertsRead = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const batch = writeBatch(db);
+      triggeredAlerts.filter(a => !a.isRead).forEach(a => {
+        batch.update(doc(db, 'triggeredAlerts', a.id), { isRead: true });
+      });
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'triggeredAlerts');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleClearAllAlerts = async () => {
+    setConfirmModal({
+      isOpen: true,
+      title: 'CLEAR INCIDENTS',
+      message: 'Are you sure you want to clear all active incidents? This action cannot be undone.',
+      onConfirm: async () => {
+        if (isSubmitting) return;
+        setIsSubmitting(true);
+        try {
+          const batch = writeBatch(db);
+          triggeredAlerts.forEach(a => {
+            batch.delete(doc(db, 'triggeredAlerts', a.id));
+          });
+          await batch.commit();
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
+        } catch (err) {
+          handleFirestoreError(err, OperationType.DELETE, 'triggeredAlerts');
         } finally {
           setIsSubmitting(false);
         }
@@ -1445,7 +1543,6 @@ export default function App() {
 
   const handleAuthSubmit = async () => {
     if (isSubmitting) return;
-    const executivePassword = (import.meta as any).env.VITE_EXECUTIVE_PASSWORD || 'admin123'; // Fallback for demo
     
     if (authModal.password === executivePassword) {
       setIsSubmitting(true);
@@ -1943,7 +2040,7 @@ export default function App() {
             </div>
 
             {/* Quick Stats */}
-            <div className="grid grid-cols-1 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
               <StatCard 
                 label="Revenue" 
                 value={f(stats.current.revenue)} 
@@ -1968,7 +2065,7 @@ export default function App() {
                     trend={stats.trends.netProfit}
                     highlight={stats.current.netProfit >= 0 ? "emerald" : "rose"}
                   />
-                  <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
+                  <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between sm:col-span-2 lg:col-span-1">
                     <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Profit Margin</p>
                     <div className="mt-2">
                       <p className="text-3xl sm:text-4xl font-bold tracking-tight text-white">{stats.current.margin.toFixed(1)}%</p>
@@ -2153,7 +2250,7 @@ export default function App() {
                   />
                 </div>
 
-                <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                   {products
                     .filter(p => p.name.toLowerCase().includes(productsSearch.toLowerCase()))
                     .map(product => {
@@ -2669,7 +2766,7 @@ export default function App() {
 
               return (
                 <div className="space-y-8">
-                  <div className="grid grid-cols-1 gap-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
                       <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Revenue</p>
                       <div className="mt-2">
@@ -2758,13 +2855,13 @@ export default function App() {
                   <h3 className="rowina-mono text-[10px] font-bold text-rowina-blue tracking-widest">ACTIVE INCIDENTS</h3>
                   <div className="flex gap-4">
                     <button 
-                      onClick={() => setTriggeredAlerts(triggeredAlerts.map(a => ({ ...a, isRead: true })))}
+                      onClick={handleMarkAllAlertsRead}
                       className="text-[8px] rowina-mono text-zinc-500 hover:text-white transition-colors"
                     >
                       MARK ALL AS READ
                     </button>
                     <button 
-                      onClick={() => setTriggeredAlerts([])}
+                      onClick={handleClearAllAlerts}
                       className="text-[8px] rowina-mono text-rose-500 hover:text-rose-400 transition-colors"
                     >
                       CLEAR ALL
@@ -2789,7 +2886,13 @@ export default function App() {
                       </div>
                       {!alert.isRead && (
                         <button 
-                          onClick={() => setTriggeredAlerts(triggeredAlerts.map(a => a.id === alert.id ? { ...a, isRead: true } : a))}
+                          onClick={async () => {
+                            try {
+                              await updateDoc(doc(db, 'triggeredAlerts', alert.id), { isRead: true });
+                            } catch (err) {
+                              handleFirestoreError(err, OperationType.UPDATE, 'triggeredAlerts');
+                            }
+                          }}
                           className="text-zinc-500 hover:text-white"
                         >
                           <CheckCircle size={14} />
@@ -2803,17 +2906,31 @@ export default function App() {
 
             {/* Alert Rules Section */}
             <div className="space-y-4">
-              <h3 className="rowina-mono text-[10px] font-bold text-zinc-500 tracking-widest">WATCHLIST RULES</h3>
-              {alerts.length === 0 ? (
+              <div className="flex justify-between items-center">
+                <h3 className="rowina-mono text-[10px] font-bold text-zinc-500 tracking-widest">WATCHLIST RULES</h3>
+                <div className="relative w-48">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" size={12} />
+                  <input 
+                    type="text" 
+                    placeholder="FILTER RULES..." 
+                    value={alertsSearch}
+                    onChange={e => setAlertsSearch(e.target.value)}
+                    className="w-full bg-rowina-gray border border-zinc-800 rounded-xl pl-8 pr-3 py-2 text-[10px] rowina-mono focus:border-rowina-blue outline-none transition-all"
+                  />
+                </div>
+              </div>
+              {alerts.filter(a => a.name.toLowerCase().includes(alertsSearch.toLowerCase())).length === 0 ? (
                 <div className="bg-rowina-gray/30 border border-dashed border-zinc-800 p-12 rounded-[2rem] text-center">
                   <Activity className="mx-auto text-zinc-800 mb-4" size={32} />
-                  <p className="rowina-mono text-[10px] text-zinc-600">NO ACTIVE SURVEILLANCE RULES</p>
+                  <p className="rowina-mono text-[10px] text-zinc-600">{alertsSearch ? 'NO MATCHING RULES FOUND' : 'NO ACTIVE SURVEILLANCE RULES'}</p>
                   <button onClick={() => setIsAlertModalOpen(true)} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
                 </div>
               ) : (
                 <div className="space-y-3">
-                  {alerts.map((rule) => (
-                    <div key={rule.id} className="bg-rowina-gray border border-zinc-800 p-5 rounded-3xl flex justify-between items-center">
+                  {alerts
+                    .filter(a => a.name.toLowerCase().includes(alertsSearch.toLowerCase()))
+                    .map((rule) => (
+                      <div key={rule.id} className="bg-rowina-gray border border-zinc-800 p-5 rounded-3xl flex justify-between items-center">
                       <div className="flex items-center gap-4">
                         <div className={cn("p-3 rounded-xl", rule.isActive ? "bg-rowina-blue/10 text-rowina-blue" : "bg-zinc-800 text-zinc-600")}>
                           <Shield size={18} />
@@ -2922,6 +3039,70 @@ export default function App() {
                 </button>
               </div>
             </div>
+
+            {userRole === 'executive' && (
+              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">
+                <div className="flex items-center gap-4 text-rowina-blue">
+                  <Key size={32} />
+                  <div>
+                    <h3 className="text-white font-bold">Executive Access Password</h3>
+                    <p className="text-zinc-500 text-xs">This password is required for employees to switch to executive mode.</p>
+                  </div>
+                </div>
+
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">
+                      SET NEW EXECUTIVE PASSWORD
+                    </label>
+                    <div className="flex gap-2">
+                      <input 
+                        type="password"
+                        placeholder="••••••••"
+                        value={newExecPassword}
+                        onChange={e => setNewExecPassword(e.target.value)}
+                        className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
+                      />
+                      <button 
+                        onClick={async () => {
+                          if (!newExecPassword || newExecPassword.length < 4) {
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'INVALID PASSWORD',
+                              message: 'Password must be at least 4 characters.',
+                              onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
+                            });
+                            return;
+                          }
+                          setIsUpdatingExecPassword(true);
+                          try {
+                            await setDoc(doc(db, 'settings', 'global'), { executivePassword: newExecPassword });
+                            setNewExecPassword('');
+                            setConfirmModal({
+                              isOpen: true,
+                              title: 'SUCCESS',
+                              message: 'Executive password updated successfully.',
+                              onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
+                            });
+                          } catch (err) {
+                            handleFirestoreError(err, OperationType.WRITE, 'settings/global');
+                          } finally {
+                            setIsUpdatingExecPassword(false);
+                          }
+                        }}
+                        disabled={isUpdatingExecPassword}
+                        className="px-8 bg-rowina-blue text-black rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
+                      >
+                        {isUpdatingExecPassword ? 'UPDATING...' : 'UPDATE'}
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 italic px-2">
+                    * Current password is required for any employee to gain executive privileges. Keep it safe.
+                  </p>
+                </div>
+              </div>
+            )}
           </motion.div>
         )}
 
@@ -3208,15 +3389,18 @@ export default function App() {
       </AnimatePresence>
 
       {/* FAB */}
-      <button className="fixed bottom-8 right-8 w-16 h-16 rounded-full rowina-pill-active flex items-center justify-center shadow-2xl z-40 hover:scale-110 transition-transform">
+      <button 
+        onClick={() => setIsSupportModalOpen(true)}
+        className="fixed bottom-8 right-8 w-16 h-16 rounded-full rowina-pill-active flex items-center justify-center shadow-2xl z-40 hover:scale-110 transition-transform"
+      >
         <MessageCircle size={28} />
       </button>
 
       {/* Modals (Simplified for token limit, but functional) */}
       <AnimatePresence>
-        {(isProductModalOpen || isSaleModalOpen || isExpenseModalOpen || isRestockModalOpen || isAlertModalOpen || isClientModalOpen || isClientTransactionModalOpen || isStaffModalOpen || isStoreModalOpen) && (
+        {(isProductModalOpen || isSaleModalOpen || isExpenseModalOpen || isRestockModalOpen || isAlertModalOpen || isClientModalOpen || isClientTransactionModalOpen || isStaffModalOpen || isStoreModalOpen || isSupportModalOpen) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setModalSearch(''); }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setIsSupportModalOpen(false); setModalSearch(''); }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
             <motion.div 
               initial={{ y: 30, opacity: 0, scale: 0.98 }} 
               animate={{ y: 0, opacity: 1, scale: 1 }} 
@@ -3226,9 +3410,17 @@ export default function App() {
             >
               <div className="flex justify-between items-center mb-8">
                 <h3 className="text-2xl font-bold rowina-title">
-                  {isProductModalOpen ? (editingProduct ? 'EDIT STOCK' : 'NEW STOCK') : isSaleModalOpen ? 'ADD SALE' : isExpenseModalOpen ? 'ADD EXPENSE' : isRestockModalOpen ? 'RESTOCK STOCK' : isAlertModalOpen ? 'NEW ALERT' : isClientModalOpen ? 'NEW CLIENT' : isStaffModalOpen ? (editingStaff ? 'EDIT STAFF' : 'NEW STAFF') : isStoreModalOpen ? (editingStore ? 'EDIT STORE' : 'NEW STORE') : 'ADJUST DEBT'}
+                  {isProductModalOpen ? (editingProduct ? 'EDIT STOCK' : 'NEW STOCK') : 
+                   isSaleModalOpen ? 'ADD SALE' : 
+                   isExpenseModalOpen ? 'ADD EXPENSE' : 
+                   isRestockModalOpen ? 'RESTOCK STOCK' : 
+                   isAlertModalOpen ? 'NEW ALERT' : 
+                   isClientModalOpen ? 'NEW CLIENT' : 
+                   isStaffModalOpen ? (editingStaff ? 'EDIT STAFF' : 'NEW STAFF') : 
+                   isStoreModalOpen ? (editingStore ? 'EDIT STORE' : 'NEW STORE') : 
+                   isSupportModalOpen ? 'SUPPORT' : 'ADJUST DEBT'}
                 </h3>
-                <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
+                <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setIsSupportModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
               </div>
               
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
@@ -3791,6 +3983,45 @@ export default function App() {
                       {isSubmitting ? 'PROCESSING...' : 'ADD EXPENDITURE'}
                     </button>
                   </>
+                )}
+
+                {isSupportModalOpen && (
+                  <div className="space-y-6">
+                    <div className="bg-rowina-black/50 p-6 rounded-3xl border border-zinc-800 space-y-4">
+                      <p className="text-sm text-zinc-400 leading-relaxed">
+                        Need assistance with Rowina Sales Tracker? Contact our executive support line or check the help documentation.
+                      </p>
+                      <div className="space-y-3">
+                        <a href="tel:+123456789" className="flex items-center gap-4 p-4 bg-zinc-900 rounded-2xl border border-zinc-800 hover:border-rowina-blue transition-colors">
+                          <div className="p-2 bg-rowina-blue/10 text-rowina-blue rounded-lg">
+                            <HelpCircle size={18} />
+                          </div>
+                          <div>
+                            <p className="text-xs font-bold text-white uppercase tracking-tight">Executive Support</p>
+                            <p className="rowina-mono text-[9px] text-zinc-500">+123 456 789</p>
+                          </div>
+                        </a>
+                        <button 
+                          onClick={() => { setIsSupportModalOpen(false); setActiveTab('help'); }}
+                          className="w-full flex items-center gap-4 p-4 bg-zinc-900 rounded-2xl border border-zinc-800 hover:border-rowina-blue transition-colors"
+                        >
+                          <div className="p-2 bg-rowina-blue/10 text-rowina-blue rounded-lg">
+                            <FileText size={18} />
+                          </div>
+                          <div className="text-left">
+                            <p className="text-xs font-bold text-white uppercase tracking-tight">Help Documentation</p>
+                            <p className="rowina-mono text-[9px] text-zinc-500">View User Guides</p>
+                          </div>
+                        </button>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={() => setIsSupportModalOpen(false)}
+                      className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:bg-zinc-700 transition-colors"
+                    >
+                      CLOSE
+                    </button>
+                  </div>
                 )}
               </div>
             </motion.div>

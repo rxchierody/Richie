@@ -89,6 +89,10 @@
 //   - timestamp: string (required)
 //   - isRead: bool (required)
 //
+// Collection: settings
+// Fields:
+//   - executivePassword: string (required)
+//
 // ===============================================================
 
 rules_version = '2';
@@ -246,6 +250,12 @@ service cloud.firestore {
         data.isRead is bool;
     }
 
+    function isValidSettings(data) {
+      return hasOnlyAllowedFields(['executivePassword']) &&
+        hasRequiredFields(['executivePassword']) &&
+        data.executivePassword is string && data.executivePassword.size() >= 4 && data.executivePassword.size() <= 100;
+    }
+
     // ===============================================================
     // Match Rules
     // ===============================================================
@@ -323,6 +333,11 @@ service cloud.firestore {
                       request.resource.data.ruleId == resource.data.ruleId &&
                       request.resource.data.timestamp == resource.data.timestamp;
       allow delete: if isAdmin();
+    }
+
+    match /settings/global {
+      allow read: if isAuthenticated();
+      allow create, update: if isAdmin() && isValidSettings(request.resource.data);
     }
 
     // Default deny

@@ -1,23 +1,21 @@
 {
-  "name": "Rowina Sales Tracker",
-  "short_name": "Rowina Sales",
-  "description": "A professional sales tracking application.",
+  "name": "Rowina Business Command",
+  "short_name": "Rowina",
+  "description": "Advanced business management and intelligence platform.",
   "start_url": "/",
   "display": "standalone",
-  "background_color": "#ffffff",
+  "background_color": "#000000",
   "theme_color": "#000000",
   "icons": [
     {
-      "src": "https://picsum.photos/seed/rowina192/192/192",
+      "src": "https://picsum.photos/seed/rowina/192/192",
       "sizes": "192x192",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     },
     {
-      "src": "https://picsum.photos/seed/rowina512/512/512",
+      "src": "https://picsum.photos/seed/rowina/512/512",
       "sizes": "512x512",
-      "type": "image/png",
-      "purpose": "any maskable"
+      "type": "image/png"
     }
   ]
 }
