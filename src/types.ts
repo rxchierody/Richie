@@ -117,4 +117,5 @@ export interface UserProfile {
   role: UserRole;
   displayName: string;
   assignedStoreIds?: string[];
+  ownerId?: string;
 }

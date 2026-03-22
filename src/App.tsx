@@ -257,6 +257,7 @@ const StatCard = ({
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
+  const [globalError, setGlobalError] = useState<string | null>(null);
   const [isLoggingIn, setIsLoggingIn] = useState(false);
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [authMethod, setAuthMethod] = useState<'email' | 'phone'>('email');
@@ -378,6 +379,13 @@ export default function App() {
   const [modalSearch, setModalSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [productsSearch, setProductsSearch] = useState('');
+
+  useEffect(() => {
+    if (globalError) {
+      const timer = setTimeout(() => setGlobalError(null), 5000);
+      return () => clearTimeout(timer);
+    }
+  }, [globalError]);
   const [clientsSearch, setClientsSearch] = useState('');
   const [staffSearch, setStaffSearch] = useState('');
   const [alertsSearch, setAlertsSearch] = useState('');
@@ -489,14 +497,16 @@ export default function App() {
                 console.warn("Email-based profile check failed (expected for new users):", e);
               }
 
-              let role: UserRole = currentUser.email === 'richielwondo434@gmail.com' ? 'executive' : 'employee';
+              let role: UserRole = 'executive'; // Default to executive for everyone to "own their own account"
               let displayName = currentUser.displayName || '';
               let assignedStoreIds: string[] = [];
+              let ownerId: string | undefined = undefined;
 
               if (emailDocData) {
                 role = emailDocData.role;
                 displayName = emailDocData.displayName || displayName;
                 assignedStoreIds = emailDocData.assignedStoreIds || [];
+                ownerId = emailDocData.ownerId;
                 // Delete the temporary email-based doc
                 try {
                   await deleteDoc(emailDocRef);
@@ -511,7 +521,8 @@ export default function App() {
                 email: currentUser.email || '',
                 role: role,
                 displayName: displayName,
-                assignedStoreIds: assignedStoreIds
+                assignedStoreIds: assignedStoreIds,
+                ownerId: ownerId || (role === 'executive' ? currentUser.uid : undefined)
               };
               await setDoc(userDocRef, newProfile);
               setUserProfile(newProfile);
@@ -538,9 +549,11 @@ export default function App() {
 
   // Firestore Real-time Sync
   useEffect(() => {
-    if (!isAuthReady) return;
+    if (!isAuthReady || !user?.uid) return;
 
-    const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', user?.uid)), (snapshot) => {
+    const accountId = userProfile?.ownerId || user?.uid;
+
+    const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', accountId)), (snapshot) => {
       const storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
       setStores(storesData);
       
@@ -555,7 +568,7 @@ export default function App() {
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'stores'));
 
     const getQuery = (colName: string) => {
-      let baseQuery = query(collection(db, colName), where('userId', '==', user?.uid));
+      let baseQuery = query(collection(db, colName), where('userId', '==', accountId));
       if (selectedStoreId !== 'ALL') {
         return query(baseQuery, where('storeId', '==', selectedStoreId));
       }
@@ -594,8 +607,11 @@ export default function App() {
       setTriggeredAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TriggeredAlert)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'triggeredAlerts'));
 
-    const unsubStaff = onSnapshot(collection(db, 'users'), (snapshot) => {
-      setStaff(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as any)));
+    const unsubStaff = onSnapshot(query(collection(db, 'users'), where('ownerId', '==', accountId)), (snapshot) => {
+      setStaff(snapshot.docs
+        .map(doc => ({ ...doc.data(), id: doc.id } as any))
+        .filter(s => s.id !== user.uid)
+      );
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
@@ -732,7 +748,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
-              userId: user?.uid || '',
+              userId: userProfile?.ownerId || user?.uid || '',
               storeId: alert.storeId,
               ruleId: alert.id,
               message: `CRITICAL: ${product.name} stock reached ${product.stockQuantity} (Threshold: ${alert.threshold})`,
@@ -748,7 +764,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
-              userId: user?.uid || '',
+              userId: userProfile?.ownerId || user?.uid || '',
               storeId: alert.storeId,
               ruleId: alert.id,
               message: `OBJECTIVE REACHED: Sales target of ${f(alert.threshold)} achieved! Current: ${f(totalSales)}`,
@@ -763,7 +779,7 @@ export default function App() {
           if (!alreadyTriggered) {
             newTriggered.push({
               id: Math.random().toString(36).substr(2, 9),
-              userId: user?.uid || '',
+              userId: userProfile?.ownerId || user?.uid || '',
               storeId: alert.storeId,
               ruleId: alert.id,
               message: `MARGIN ALERT: Current profit margin (${stats.current.margin.toFixed(1)}%) is below threshold (${alert.threshold}%)`,
@@ -786,7 +802,7 @@ export default function App() {
             if (!alreadyTriggered) {
               newTriggered.push({
                 id: Math.random().toString(36).substr(2, 9),
-                userId: user?.uid || '',
+                userId: userProfile?.ownerId || user?.uid || '',
                 storeId: alert.storeId,
                 ruleId: alert.id,
                 message: `VELOCITY ALERT: ${product.name} is selling fast! ${productSalesLast24h} units sold in last 24h.`,
@@ -829,6 +845,7 @@ export default function App() {
   const handleAddProduct = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (!productForm.name) {
         throw new Error("Product Name is required.");
@@ -847,7 +864,7 @@ export default function App() {
       const { id, ...data } = productForm;
       const payload = {
         ...data,
-        userId: user?.uid,
+        userId: userProfile?.ownerId || user?.uid,
         storeId,
         stockQuantity: productForm.stockQuantity || 0,
         buyingPrice: productForm.buyingPrice || 0,
@@ -866,6 +883,8 @@ export default function App() {
       setProductForm({ name: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined });
       setIsProductModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to save product";
+      setGlobalError(msg);
       handleFirestoreError(err, editingProduct ? OperationType.UPDATE : OperationType.CREATE, 'products');
     } finally {
       setIsSubmitting(false);
@@ -874,11 +893,13 @@ export default function App() {
 
   const handleAddSale = async () => {
     if (isSubmitting) return;
-    const product = products.find(p => p.id === saleForm.productId);
-    if (!product) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (!saleForm.productId) throw new Error("Please select a product.");
+      const product = products.find(p => p.id === saleForm.productId);
+      if (!product) throw new Error("Product not found.");
+      
       if (!saleForm.quantity || saleForm.quantity <= 0) throw new Error("Quantity must be greater than 0.");
       if (saleForm.quantity > product.stockQuantity) throw new Error(`Insufficient stock. Available: ${product.stockQuantity}`);
 
@@ -887,7 +908,7 @@ export default function App() {
       const newSaleDocRef = doc(collection(db, 'sales'));
       const saleData = { 
         ...saleForm, 
-        userId: user?.uid,
+        userId: userProfile?.ownerId || user?.uid,
         storeId,
         quantity: saleForm.quantity || 0,
         discount: saleForm.discount || 0,
@@ -907,6 +928,8 @@ export default function App() {
       setSaleForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
       setIsSaleModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to add sale";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.CREATE, 'sales');
     } finally {
       setIsSubmitting(false);
@@ -916,6 +939,7 @@ export default function App() {
   const handleAddExpense = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (!expenseForm.amount || expenseForm.amount <= 0) throw new Error("Amount must be greater than 0.");
       if (!expenseForm.description) throw new Error("Description is required.");
@@ -927,13 +951,15 @@ export default function App() {
       const newDocRef = doc(colRef);
       await setDoc(newDocRef, { 
         ...expenseForm, 
-        userId: user?.uid,
+        userId: userProfile?.ownerId || user?.uid,
         storeId,
         amount: expenseForm.amount || 0
       });
       setExpenseForm({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
       setIsExpenseModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to add expense";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.CREATE, 'expenses');
     } finally {
       setIsSubmitting(false);
@@ -942,10 +968,13 @@ export default function App() {
 
   const handleAddRestock = async () => {
     if (isSubmitting) return;
-    const product = products.find(p => p.id === restockForm.productId);
-    if (!product) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
+      if (!restockForm.productId) throw new Error("Please select a product.");
+      const product = products.find(p => p.id === restockForm.productId);
+      if (!product) throw new Error("Product not found.");
+
       if (!restockForm.quantity || restockForm.quantity <= 0) throw new Error("Quantity must be greater than 0.");
       if (restockForm.unitCost && restockForm.unitCost < 0) throw new Error("Unit cost cannot be negative.");
 
@@ -956,7 +985,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       await setDoc(newDocRef, { 
         ...restockForm, 
-        userId: user?.uid,
+        userId: userProfile?.ownerId || user?.uid,
         storeId,
         quantity: restockForm.quantity || 0,
         unitCost: restockForm.unitCost || product.buyingPrice 
@@ -970,6 +999,8 @@ export default function App() {
       setRestockForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
       setIsRestockModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to add restock";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.CREATE, 'restocks');
     } finally {
       setIsSubmitting(false);
@@ -979,6 +1010,7 @@ export default function App() {
   const handleAddAlert = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (!alertForm.name) throw new Error("Alert name is required.");
       if (alertForm.threshold === undefined || alertForm.threshold < 0) throw new Error("Threshold must be 0 or greater.");
@@ -990,7 +1022,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       await setDoc(newDocRef, { 
         ...alertForm, 
-        userId: user?.uid,
+        userId: userProfile?.ownerId || user?.uid,
         storeId,
         threshold: alertForm.threshold || 0,
         createdAt: new Date().toISOString()
@@ -998,6 +1030,8 @@ export default function App() {
       setAlertForm({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
       setIsAlertModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to add alert";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.CREATE, 'alertRules');
     } finally {
       setIsSubmitting(false);
@@ -1007,6 +1041,7 @@ export default function App() {
   const handleAddClient = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (!clientForm.name) throw new Error("Client name is required.");
 
@@ -1026,7 +1061,7 @@ export default function App() {
         const newDocRef = doc(colRef);
         await setDoc(newDocRef, {
           ...clientForm,
-          userId: user?.uid,
+          userId: userProfile?.ownerId || user?.uid,
           storeId,
           totalDebt: clientForm.totalDebt || 0,
           createdAt: new Date().toISOString()
@@ -1035,6 +1070,8 @@ export default function App() {
       setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
       setIsClientModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to save client";
+      setGlobalError(msg);
       handleFirestoreError(err, editingClient ? OperationType.UPDATE : OperationType.CREATE, 'clients');
     } finally {
       setIsSubmitting(false);
@@ -1049,6 +1086,7 @@ export default function App() {
       onConfirm: async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
+        setGlobalError(null);
         try {
           const batch = writeBatch(db);
           batch.delete(doc(db, 'clients', clientId));
@@ -1061,7 +1099,10 @@ export default function App() {
           await batch.commit();
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to delete client";
+          setGlobalError(msg);
           handleFirestoreError(err, OperationType.DELETE, `clients/${clientId}`);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } finally {
           setIsSubmitting(false);
         }
@@ -1071,9 +1112,10 @@ export default function App() {
 
   const handleAddClientTransaction = async () => {
     if (isSubmitting) return;
-    if (!selectedClient) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
+      if (!selectedClient) throw new Error("Please select a client first.");
       if (!clientTransactionForm.amount || clientTransactionForm.amount <= 0) throw new Error("Amount must be greater than 0.");
       if (clientTransactionForm.type === 'CREDIT' && clientTransactionForm.productId) {
         const product = products.find(p => p.id === clientTransactionForm.productId);
@@ -1089,7 +1131,7 @@ export default function App() {
       const newDocRef = doc(colRef);
       const transactionData = {
         ...clientTransactionForm,
-        userId: user?.uid,
+        userId: userProfile?.ownerId || user?.uid,
         storeId,
         amount: clientTransactionForm.amount || 0,
         clientId: selectedClient.id
@@ -1120,6 +1162,8 @@ export default function App() {
       });
       setIsClientTransactionModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to record transaction";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.CREATE, 'clientTransactions');
     } finally {
       setIsSubmitting(false);
@@ -1129,6 +1173,7 @@ export default function App() {
   const handleAddStaff = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (editingStaff) {
         const docRef = doc(db, 'users', editingStaff.id);
@@ -1137,11 +1182,16 @@ export default function App() {
       } else {
         // Use email as ID for pre-authorized staff so they can be found on first login
         const docRef = doc(db, 'users', staffForm.email.toLowerCase());
-        await setDoc(docRef, staffForm);
+        await setDoc(docRef, {
+          ...staffForm,
+          ownerId: userProfile?.ownerId || user?.uid // Link staff to the owner of this account
+        });
       }
       setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
       setIsStaffModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to save staff";
+      setGlobalError(msg);
       handleFirestoreError(err, editingStaff ? OperationType.UPDATE : OperationType.CREATE, 'users');
     } finally {
       setIsSubmitting(false);
@@ -1151,6 +1201,7 @@ export default function App() {
   const handleAddStore = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setGlobalError(null);
     try {
       if (editingStore) {
         const docRef = doc(db, 'stores', editingStore.id);
@@ -1161,13 +1212,15 @@ export default function App() {
         const newDocRef = doc(colRef);
         await setDoc(newDocRef, { 
           ...storeForm, 
-          userId: user?.uid,
+          userId: userProfile?.ownerId || user?.uid,
           createdAt: new Date().toISOString() 
         });
       }
       setStoreForm({ name: '', location: '' });
       setIsStoreModalOpen(false);
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to save store";
+      setGlobalError(msg);
       handleFirestoreError(err, editingStore ? OperationType.UPDATE : OperationType.CREATE, 'stores');
     } finally {
       setIsSubmitting(false);
@@ -1182,6 +1235,7 @@ export default function App() {
       onConfirm: async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
+        setGlobalError(null);
         try {
           const batch = writeBatch(db);
           
@@ -1210,7 +1264,10 @@ export default function App() {
 
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to delete store";
+          setGlobalError(msg);
           handleFirestoreError(err, OperationType.DELETE, `stores/${storeId}`);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } finally {
           setIsSubmitting(false);
         }
@@ -1226,11 +1283,15 @@ export default function App() {
       onConfirm: async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
+        setGlobalError(null);
         try {
           await deleteDoc(doc(db, 'users', staffId));
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to remove staff";
+          setGlobalError(msg);
           handleFirestoreError(err, OperationType.DELETE, `users/${staffId}`);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } finally {
           setIsSubmitting(false);
         }
@@ -1246,6 +1307,7 @@ export default function App() {
       onConfirm: async () => {
         if (isSubmitting) return;
         setIsSubmitting(true);
+        setGlobalError(null);
         try {
           const batch = writeBatch(db);
           batch.delete(doc(db, 'products', productId));
@@ -1257,7 +1319,10 @@ export default function App() {
           await batch.commit();
           setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } catch (err) {
+          const msg = err instanceof Error ? err.message : "Failed to delete product";
+          setGlobalError(msg);
           handleFirestoreError(err, OperationType.DELETE, `products/${productId}`);
+          setConfirmModal(prev => ({ ...prev, isOpen: false }));
         } finally {
           setIsSubmitting(false);
         }
@@ -1306,19 +1371,33 @@ export default function App() {
   };
 
   const handleDeleteAlert = async (alertId: string) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setGlobalError(null);
     try {
       await deleteDoc(doc(db, 'alertRules', alertId));
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to delete alert";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.DELETE, `alertRules/${alertId}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
   const handleToggleAlert = async (alert: AlertRule) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setGlobalError(null);
     try {
       const docRef = doc(db, 'alertRules', alert.id);
       await updateDoc(docRef, { isActive: !alert.isActive });
     } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to toggle alert";
+      setGlobalError(msg);
       handleFirestoreError(err, OperationType.UPDATE, `alertRules/${alert.id}`);
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -1899,6 +1978,27 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-rowina-black text-zinc-100 p-6 md:p-12 max-w-2xl mx-auto pb-32">
+      {/* Global Error Toast */}
+      <AnimatePresence>
+        {globalError && (
+          <motion.div 
+            initial={{ opacity: 0, y: -50 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -50 }}
+            className="fixed top-6 left-1/2 -translate-x-1/2 z-[100] w-full max-w-md px-6"
+          >
+            <div className="bg-rose-500 text-white p-4 rounded-2xl shadow-2xl flex items-center justify-between gap-4 border border-rose-400">
+              <div className="flex items-center gap-3">
+                <AlertTriangle size={18} />
+                <p className="text-[10px] rowina-mono font-bold uppercase tracking-widest">{globalError}</p>
+              </div>
+              <button onClick={() => setGlobalError(null)} className="p-1 hover:bg-white/20 rounded-lg transition-all">
+                <X size={14} />
+              </button>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {/* PWA Install Button */}
       {(showInstallButton || (isIOS && !isStandalone)) && (
         <motion.button
@@ -3825,7 +3925,7 @@ export default function App() {
                         isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
-                      {isSubmitting ? 'PROCESSING...' : 'EXECUTE STOCK COMMAND'}
+                      {isSubmitting ? 'PROCESSING...' : (editingProduct ? 'UPDATE PRODUCT' : 'ADD PRODUCT')}
                     </button>
                   </>
                 )}
@@ -3925,7 +4025,7 @@ export default function App() {
                         isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
-                      {isSubmitting ? 'PROCESSING...' : 'ADD TRANSACTION'}
+                      {isSubmitting ? 'PROCESSING...' : 'CONFIRM SALE'}
                     </button>
                   </>
                 )}
@@ -4003,7 +4103,7 @@ export default function App() {
                         isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-emerald-500 text-black hover:bg-emerald-400"
                       )}
                     >
-                      {isSubmitting ? 'PROCESSING...' : 'EXECUTE RESTOCK'}
+                      {isSubmitting ? 'PROCESSING...' : 'CONFIRM RESTOCK'}
                     </button>
                   </>
                 )}
@@ -4047,7 +4147,7 @@ export default function App() {
                         isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
                       )}
                     >
-                      {isSubmitting ? 'PROCESSING...' : 'ADD EXPENDITURE'}
+                      {isSubmitting ? 'PROCESSING...' : 'CONFIRM EXPENDITURE'}
                     </button>
                   </>
                 )}
