@@ -905,6 +905,8 @@ export default function App() {
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
+      
+      const batch = writeBatch(db);
       const newSaleDocRef = doc(collection(db, 'sales'));
       const saleData = { 
         ...saleForm, 
@@ -917,13 +919,15 @@ export default function App() {
         paymentMethod: saleForm.paymentMethod || 'Cash'
       };
       
-      await setDoc(newSaleDocRef, saleData);
+      batch.set(newSaleDocRef, saleData);
       
       // Update stock
       const productDocRef = doc(db, 'products', product.id);
-      await updateDoc(productDocRef, { 
+      batch.update(productDocRef, { 
         stockQuantity: product.stockQuantity - (saleForm.quantity || 0) 
       });
+
+      await batch.commit();
 
       setSaleForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
       setIsSaleModalOpen(false);
@@ -981,9 +985,10 @@ export default function App() {
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
+      const batch = writeBatch(db);
       const colRef = collection(db, 'restocks');
       const newDocRef = doc(colRef);
-      await setDoc(newDocRef, { 
+      batch.set(newDocRef, { 
         ...restockForm, 
         userId: userProfile?.ownerId || user?.uid,
         storeId,
@@ -992,9 +997,11 @@ export default function App() {
       });
       
       const productDocRef = doc(db, 'products', product.id);
-      await updateDoc(productDocRef, { 
+      batch.update(productDocRef, { 
         stockQuantity: product.stockQuantity + (restockForm.quantity || 0) 
       });
+
+      await batch.commit();
 
       setRestockForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
       setIsRestockModalOpen(false);
@@ -1127,6 +1134,7 @@ export default function App() {
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
+      const batch = writeBatch(db);
       const colRef = collection(db, 'clientTransactions');
       const newDocRef = doc(colRef);
       const transactionData = {
@@ -1137,12 +1145,12 @@ export default function App() {
         clientId: selectedClient.id
       };
       
-      await setDoc(newDocRef, transactionData);
+      batch.set(newDocRef, transactionData);
       
       // Update client debt
       const debtChange = clientTransactionForm.type === 'CREDIT' ? (clientTransactionForm.amount || 0) : -(clientTransactionForm.amount || 0);
       const clientDocRef = doc(db, 'clients', selectedClient.id);
-      await updateDoc(clientDocRef, { 
+      batch.update(clientDocRef, { 
         totalDebt: selectedClient.totalDebt + debtChange 
       });
 
@@ -1151,11 +1159,13 @@ export default function App() {
         const product = products.find(p => p.id === clientTransactionForm.productId);
         if (product) {
           const productDocRef = doc(db, 'products', product.id);
-          await updateDoc(productDocRef, { 
+          batch.update(productDocRef, { 
             stockQuantity: product.stockQuantity - (clientTransactionForm.quantity || 0) 
           });
         }
       }
+      
+      await batch.commit();
       
       setClientTransactionForm({
         date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined
@@ -1199,6 +1209,11 @@ export default function App() {
   };
 
   const handleAddStore = async () => {
+    if (!storeForm.name.trim()) {
+      setGlobalError("Store Name is required.");
+      return;
+    }
+    
     if (isSubmitting) return;
     setIsSubmitting(true);
     setGlobalError(null);

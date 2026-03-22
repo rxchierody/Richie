@@ -108,7 +108,9 @@ service cloud.firestore {
     }
 
     function getAccountOwnerId() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownerId;
+      return exists(/databases/$(database)/documents/users/$(request.auth.uid))
+        ? get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', request.auth.uid)
+        : request.auth.uid;
     }
 
     function isAccountMember(docUserId) {
@@ -155,7 +157,7 @@ service cloud.firestore {
     function isValidStore(data) {
       return hasOnlyAllowedFields(['userId', 'name', 'location', 'createdAt']) &&
         hasRequiredFields(['userId', 'name', 'createdAt']) &&
-        data.userId == getAccountOwnerId() &&
+        (data.userId == getAccountOwnerId() || data.userId == request.auth.uid) &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         (!('location' in data) || (data.location is string && data.location.size() <= 200)) &&
         isValidDateString(data.createdAt);
@@ -289,8 +291,7 @@ service cloud.firestore {
                    (isAdmin() && resource.data.ownerId == getAccountOwnerId()) || 
                    (userId == request.auth.token.email || userId == request.auth.token.email.lower()));
       allow list: if isAdmin() && resource.data.ownerId == getAccountOwnerId();
-      allow create: if (isAuthenticated() && (request.auth.uid == userId || isAdmin())) && isValidUser(request.resource.data) && 
-                      (isAdmin() || request.resource.data.role == 'employee');
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin()) && isValidUser(request.resource.data);
       allow update: if (isAuthenticated() && (request.auth.uid == userId || (isAdmin() && resource.data.ownerId == getAccountOwnerId()))) && 
                       isValidUser(request.resource.data) && 
                       request.resource.data.email == resource.data.email &&
