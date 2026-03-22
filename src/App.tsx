@@ -637,7 +637,7 @@ export default function App() {
       unsubStaff();
       unsubSettings();
     };
-  }, [isAuthReady, user, selectedStoreId, userRole]);
+  }, [isAuthReady, user, selectedStoreId, userRole, userProfile]);
 
   // Test Connection
   useEffect(() => {
@@ -3412,46 +3412,68 @@ export default function App() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {stores.map(store => (
-                <div key={store.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400">
-                      <Package size={24} />
-                    </div>
-                    <div>
-                      <h4 className="font-bold text-white text-sm">{store.name}</h4>
-                      <p className="rowina-mono text-[9px] text-zinc-500 uppercase">{store.location || 'NO LOCATION SET'}</p>
-                    </div>
+              {stores.length === 0 ? (
+                <div className="col-span-full bg-rowina-gray border border-zinc-800 p-12 rounded-[40px] text-center space-y-4">
+                  <div className="w-16 h-16 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-500 mx-auto">
+                    <Package size={32} />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => {
-                        if (isSubmitting) return;
-                        setEditingStore(store);
-                        setStoreForm({ name: store.name, location: store.location || '' });
-                        setIsStoreModalOpen(true);
-                      }}
-                      disabled={isSubmitting}
-                      className={cn(
-                        "p-2 transition-colors",
-                        isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-rowina-blue"
-                      )}
-                    >
-                      <Edit2 size={16} />
-                    </button>
-                    <button 
-                      onClick={() => !isSubmitting && handleDeleteStore(store.id)}
-                      disabled={isSubmitting}
-                      className={cn(
-                        "p-2 transition-colors",
-                        isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-rose-500"
-                      )}
-                    >
-                      <Trash2 size={16} />
-                    </button>
+                  <div>
+                    <h3 className="text-lg font-bold text-white">No Stores Found</h3>
+                    <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Initialize your first store to begin</p>
                   </div>
+                  <button 
+                    onClick={() => {
+                      setEditingStore(null);
+                      setStoreForm({ name: '', location: '' });
+                      setIsStoreModalOpen(true);
+                    }}
+                    className="rowina-pill-active px-6 py-2 rounded-full text-[10px] rowina-mono font-bold"
+                  >
+                    INITIALIZE STORE
+                  </button>
                 </div>
-              ))}
+              ) : (
+                stores.map(store => (
+                  <div key={store.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center group hover:border-rowina-blue/50 transition-all">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center text-zinc-400 group-hover:bg-rowina-blue/10 group-hover:text-rowina-blue transition-all">
+                        <Package size={24} />
+                      </div>
+                      <div>
+                        <h4 className="font-bold text-white text-sm">{store.name}</h4>
+                        <p className="rowina-mono text-[9px] text-zinc-500 uppercase">{store.location || 'NO LOCATION SET'}</p>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button 
+                        onClick={() => {
+                          if (isSubmitting) return;
+                          setEditingStore(store);
+                          setStoreForm({ name: store.name, location: store.location || '' });
+                          setIsStoreModalOpen(true);
+                        }}
+                        disabled={isSubmitting}
+                        className={cn(
+                          "p-2 transition-colors",
+                          isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-rowina-blue"
+                        )}
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button 
+                        onClick={() => !isSubmitting && handleDeleteStore(store.id)}
+                        disabled={isSubmitting}
+                        className={cn(
+                          "p-2 transition-colors",
+                          isSubmitting ? "text-zinc-800 cursor-not-allowed" : "text-zinc-500 hover:text-rose-500"
+                        )}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
             </div>
           </motion.div>
         )}
