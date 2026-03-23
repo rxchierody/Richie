@@ -120,7 +120,8 @@ service cloud.firestore {
     function isAdmin() {
       return isAuthenticated() &&
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive');
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive' ||
+         (request.auth.token.email == "richielwondo434@gmail.com" && request.auth.token.email_verified == true));
     }
 
     function isEmployee() {
@@ -164,13 +165,14 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id', 'ownerId']) &&
+      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id', 'ownerId', 'phone']) &&
         hasRequiredFields(['email', 'role']) &&
         data.email is string && isValidEmail(data.email) && data.email.size() <= 100 &&
         data.role in ['executive', 'employee'] &&
         (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
         (!('assignedStoreIds' in data) || (data.assignedStoreIds is list)) &&
-        (!('ownerId' in data) || (data.ownerId is string));
+        (!('ownerId' in data) || (data.ownerId is string)) &&
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20));
     }
 
     function isValidProduct(data) {
