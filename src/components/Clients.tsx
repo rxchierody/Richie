@@ -47,7 +47,7 @@ const Clients: React.FC<ClientsProps> = ({
         <button 
           onClick={() => requireAuth(() => {
             setEditingClient(null);
-            setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
+            setClientForm({ name: '', phone: '', totalDebt: undefined });
             setIsClientModalOpen(true);
           })}
           className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
@@ -100,7 +100,7 @@ const Clients: React.FC<ClientsProps> = ({
                 <button 
                   onClick={() => requireAuth(() => {
                     setEditingClient(client);
-                    setClientForm({ name: client.name, phone: client.phone, email: client.email, totalDebt: client.totalDebt });
+                    setClientForm({ name: client.name, phone: client.phone, totalDebt: client.totalDebt });
                     setIsClientModalOpen(true);
                   })}
                   className="w-12 bg-zinc-800 hover:bg-rowina-blue/20 hover:text-rowina-blue text-zinc-500 rounded-xl flex items-center justify-center transition-all"

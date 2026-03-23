@@ -92,7 +92,6 @@ export interface Client {
   storeId: string;
   name: string;
   phone: string;
-  email?: string;
   totalDebt: number;
   createdAt: string;
 }

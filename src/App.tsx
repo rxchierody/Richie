@@ -367,7 +367,7 @@ export default function App() {
   const [saleForm, setSaleForm] = useState<Partial<Sale>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
   const [expenseForm, setExpenseForm] = useState<Partial<Expense>>({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
   const [restockForm, setRestockForm] = useState<Partial<Restock>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
-  const [clientForm, setClientForm] = useState<Partial<Client>>({ name: '', phone: '', email: '', totalDebt: undefined });
+  const [clientForm, setClientForm] = useState<Partial<Client>>({ name: '', phone: '', totalDebt: undefined });
   const [clientTransactionForm, setClientTransactionForm] = useState<Partial<ClientTransaction>>({ date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined });
   const [alertForm, setAlertForm] = useState<Partial<AlertRule>>({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
   const [staffForm, setStaffForm] = useState<{ email: string; role: UserRole; displayName: string; assignedStoreIds: string[] }>({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
@@ -1074,7 +1074,7 @@ export default function App() {
           createdAt: new Date().toISOString()
         });
       }
-      setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
+      setClientForm({ name: '', phone: '', totalDebt: undefined });
       setIsClientModalOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save client";
@@ -2798,7 +2798,7 @@ export default function App() {
               <button 
                 onClick={() => requireAuth(() => {
                   setEditingClient(null);
-                  setClientForm({ name: '', phone: '', email: '', totalDebt: undefined });
+                  setClientForm({ name: '', phone: '', totalDebt: undefined });
                   setIsClientModalOpen(true);
                 })}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
@@ -2851,7 +2851,7 @@ export default function App() {
                       <button 
                         onClick={() => requireAuth(() => {
                           setEditingClient(client);
-                          setClientForm({ name: client.name, phone: client.phone, email: client.email, totalDebt: client.totalDebt });
+                          setClientForm({ name: client.name, phone: client.phone, totalDebt: client.totalDebt });
                           setIsClientModalOpen(true);
                         })}
                         className="w-12 bg-zinc-800 hover:bg-rowina-blue/20 hover:text-rowina-blue text-zinc-500 rounded-xl flex items-center justify-center transition-all"
@@ -3791,10 +3791,7 @@ export default function App() {
                       <label className="text-[10px] rowina-mono text-zinc-500 ml-2">PHONE NUMBER</label>
                       <input type="text" placeholder="PHONE" value={clientForm.phone} onChange={e => setClientForm({ ...clientForm, phone: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
                     </div>
-                    <div className="space-y-2">
-                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">EMAIL (OPTIONAL)</label>
-                      <input type="email" placeholder="EMAIL" value={clientForm.email} onChange={e => setClientForm({ ...clientForm, email: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
-                    </div>
+
                     <button 
                       onClick={handleAddClient} 
                       disabled={isSubmitting}

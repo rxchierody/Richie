@@ -82,7 +82,6 @@
         "storeId": { "type": "string" },
         "name": { "type": "string" },
         "phone": { "type": "string" },
-        "email": { "type": "string" },
         "totalDebt": { "type": "number" },
         "createdAt": { "type": "string", "format": "date-time" }
       },

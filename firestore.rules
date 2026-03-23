@@ -225,13 +225,12 @@ service cloud.firestore {
     }
 
     function isValidClient(data) {
-      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'phone', 'email', 'totalDebt', 'createdAt']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'phone', 'totalDebt', 'createdAt']) &&
         hasRequiredFields(['userId', 'storeId', 'name', 'phone', 'totalDebt', 'createdAt']) &&
         data.userId == getAccountOwnerId() &&
         data.storeId is string &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         data.phone is string && data.phone.size() <= 20 &&
-        (!('email' in data) || (data.email is string && isValidEmail(data.email) && data.email.size() <= 100)) &&
         data.totalDebt is number &&
         isValidDateString(data.createdAt);
     }
