@@ -40,7 +40,9 @@ import {
   Lock,
   Key,
   Fingerprint,
-  Printer
+  Printer,
+  Eye,
+  EyeOff
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -87,6 +89,7 @@ import {
   signOut,
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
+  sendPasswordResetEmail,
   RecaptchaVerifier,
   signInWithPhoneNumber,
   updateProfile
@@ -269,6 +272,21 @@ export default function App() {
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
   const [showAuthScreen, setShowAuthScreen] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [showPassword, setShowPassword] = useState(false);
+  const [isForgotPassword, setIsForgotPassword] = useState(false);
+  const [resetSent, setResetSent] = useState(false);
+  
+  // 2FA Auth State
+  const [requiresOtp, setRequiresOtp] = useState(false);
+  const [otpToken, setOtpToken] = useState('');
+  const [pendingUser, setPendingUser] = useState<any>(null);
+
+  // OTP Setup State
+  const [otpSetupStep, setOtpSetupStep] = useState<'INITIAL' | 'QR' | 'VERIFY'>('INITIAL');
+  const [otpQrCode, setOtpQrCode] = useState('');
+  const [otpSecretRaw, setOtpSecretRaw] = useState('');
+  const [otpVerifyError, setOtpVerifyError] = useState('');
+  
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
   const [documentSubTab, setDocumentSubTab] = useState<'RECEIPTS' | 'INVOICES' | 'QUOTATIONS'>('RECEIPTS');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
@@ -551,7 +569,8 @@ export default function App() {
                 role: role,
                 displayName: displayName,
                 assignedStoreIds: assignedStoreIds,
-                ownerId: ownerId || (role === 'executive' ? currentUser.uid : undefined)
+                ownerId: ownerId || (role === 'executive' ? currentUser.uid : undefined),
+                notificationsEnabled: true
               };
               await setDoc(userDocRef, newProfile);
               setUserProfile(newProfile);
@@ -575,6 +594,25 @@ export default function App() {
     });
     return () => unsubscribe();
   }, []);
+
+  // Clear data on logout
+  useEffect(() => {
+    if (!user) {
+      setStores([]);
+      setProducts([]);
+      setSales([]);
+      setExpenses([]);
+      setRestocks([]);
+      setClients([]);
+      setClientTransactions([]);
+      setQuotations([]);
+      setInvoices([]);
+      setAlerts([]);
+      setTriggeredAlerts([]);
+      setStaff([]);
+      setUserProfile(null);
+    }
+  }, [user]);
 
   // Firestore Real-time Sync
   useEffect(() => {
@@ -774,6 +812,7 @@ export default function App() {
   // Alert Logic
   useEffect(() => {
     if (products.length === 0 && sales.length === 0) return;
+    if (userProfile?.notificationsEnabled === false) return;
 
     const newTriggered: TriggeredAlert[] = [];
     const now = new Date();
@@ -1489,6 +1528,69 @@ export default function App() {
     }
   };
 
+  const handleSetupOtp = async () => {
+    if (!user) return;
+    setIsLoggingIn(true);
+    try {
+      const response = await fetch('/api/otp/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: user.email })
+      });
+      const data = await response.json();
+      setOtpQrCode(data.qrCodeUrl);
+      setOtpSecretRaw(data.encryptedSecret);
+      setOtpSetupStep('QR');
+    } catch (err) {
+      console.error("OTP Setup Failed:", err);
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleConfirmOtpSetup = async () => {
+    if (!otpToken || !user) return;
+    setIsLoggingIn(true);
+    setOtpVerifyError('');
+    try {
+      const response = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: otpToken, encryptedSecret: otpSecretRaw })
+      });
+      const data = await response.json();
+      if (data.success) {
+        await updateDoc(doc(db, 'users', user.uid), {
+          otpEnabled: true,
+          otpSecret: otpSecretRaw
+        });
+        if (userProfile) setUserProfile({ ...userProfile, otpEnabled: true, otpSecret: otpSecretRaw });
+        setOtpSetupStep('INITIAL');
+        setOtpToken('');
+      } else {
+        setOtpVerifyError(data.error);
+      }
+    } catch (err) {
+      setOtpVerifyError("VERIFICATION FAILED");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleDisableOtp = async () => {
+    if (!user || !userProfile) return;
+    if (!window.confirm("ARE YOU SURE YOU WANT TO DISABLE TWO-FACTOR AUTHENTICATION? THIS REDUCES ACCOUNT SECURITY.")) return;
+    try {
+      await updateDoc(doc(db, 'users', user.uid), {
+        otpEnabled: false,
+        otpSecret: null
+      });
+      setUserProfile({ ...userProfile, otpEnabled: false, otpSecret: undefined });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, 'users');
+    }
+  };
+
   const handleAddStaff = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
@@ -1846,36 +1948,32 @@ export default function App() {
     e.preventDefault();
     if (isLoggingIn) return;
     
-    const email = emailForm.email.trim();
-    const password = emailForm.password.trim();
+    const email = emailForm.email.trim().toLowerCase();
+    const password = emailForm.password;
     
-    if (!email || !password) {
-      setLoginError("EMAIL AND PASSWORD REQUIRED");
+    if (!email || (authMode === 'login' ? !password : !password || !emailForm.username)) {
+      setLoginError("ALL FIELDS REQUIRED");
       return;
     }
 
     setIsLoggingIn(true);
     setLoginError(null);
+
     try {
       if (authMode === 'login') {
-        await signInWithEmailAndPassword(auth, email, password);
-      } else {
-        if (!emailForm.username) {
-          setLoginError("USERNAME REQUIRED FOR REGISTRATION");
+        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        
+        // 2FA Check Logic
+        const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
+        if (userDoc.exists() && userDoc.data()?.otpEnabled) {
+          setPendingUser(userCredential.user);
+          setRequiresOtp(true);
           setIsLoggingIn(false);
-          return;
+          return; // Don't close auth screen yet, wait for OTP
         }
+      } else {
         const userCredential = await createUserWithEmailAndPassword(auth, email, password);
-        // Set display name in profile
         await updateProfile(userCredential.user, { displayName: emailForm.username });
-        // Also update Firestore profile
-        await setDoc(doc(db, 'users', userCredential.user.uid), {
-          id: userCredential.user.uid,
-          email: email,
-          role: 'employee',
-          displayName: emailForm.username,
-          assignedStoreIds: []
-        });
       }
       setShowAuthScreen(false);
     } catch (error: any) {
@@ -1884,15 +1982,55 @@ export default function App() {
         setLoginError("INVALID EMAIL OR PASSWORD");
       } else if (error.code === 'auth/email-already-in-use') {
         setLoginError("EMAIL ALREADY REGISTERED");
-      } else if (error.code === 'auth/weak-password') {
-        setLoginError("PASSWORD TOO WEAK (MIN 6 CHARS)");
-      } else if (error.code === 'auth/operation-not-allowed') {
-        setLoginError("EMAIL/PASSWORD AUTH NOT ENABLED. USE GOOGLE.");
-      } else if (error.code === 'auth/too-many-requests') {
-        setLoginError("TOO MANY ATTEMPTS. TRY AGAIN LATER.");
       } else {
         setLoginError(error.message?.toUpperCase() || "AUTHENTICATION FAILED");
       }
+    } finally {
+      if (!requiresOtp) setIsLoggingIn(false);
+    }
+  };
+
+  const handleVerifyOtp = async () => {
+    if (!otpToken || otpToken.length !== 6 || !pendingUser) return;
+    setIsLoggingIn(true);
+    setLoginError(null);
+    try {
+      const userDoc = await getDoc(doc(db, 'users', pendingUser.uid));
+      const encryptedSecret = userDoc.data()?.otpSecret;
+
+      const response = await fetch('/api/otp/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: otpToken, encryptedSecret })
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setShowAuthScreen(false);
+        setRequiresOtp(false);
+        setPendingUser(null);
+        setOtpToken('');
+      } else {
+        setLoginError(data.error || "INVALID OTP CODE");
+      }
+    } catch (err) {
+      setLoginError("VERIFICATION FAILED. TRY AGAIN.");
+    } finally {
+      setIsLoggingIn(false);
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!emailForm.email) {
+      setLoginError("ENTER YOUR EMAIL FIRST");
+      return;
+    }
+    setIsLoggingIn(true);
+    try {
+      await sendPasswordResetEmail(auth, emailForm.email);
+      setResetSent(true);
+    } catch (err: any) {
+      setLoginError(err.message.toUpperCase());
     } finally {
       setIsLoggingIn(false);
     }
@@ -2045,202 +2183,220 @@ export default function App() {
 
   if (isAuthReady && !user && showAuthScreen) {
     return (
-      <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
-        <div className="max-w-md w-full space-y-12 text-center">
+      <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6 sm:p-12 overflow-y-auto">
+        <div className="max-w-md w-full py-12 space-y-12 text-center">
           <div className="space-y-4">
-            <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white">Rowina<br />Sales</h1>
-            <p className="rowina-mono text-zinc-500 text-xs tracking-[0.3em] uppercase">Professional Sales Tracking</p>
+            <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white tracking-tight">Rowina<br />Finance</h1>
+            <p className="rowina-mono text-zinc-500 text-xs tracking-[0.4em] uppercase font-bold">Secure Core v2.0</p>
           </div>
           
-          <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8">
-            <div className="w-16 h-16 bg-zinc-800 rounded-full flex items-center justify-center mx-auto text-rowina-blue">
-              <Shield size={32} />
-            </div>
-            <div className="space-y-2">
-              <h2 className="text-xl font-bold text-white">{authMode === 'login' ? 'Access Restricted' : 'Create Account'}</h2>
-              <p className="text-zinc-500 text-sm">Please authenticate to perform this action.</p>
+          <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8 relative overflow-hidden shadow-2xl">
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-rowina-blue to-transparent opacity-30" />
+            
+            <div className="w-20 h-20 bg-zinc-800/50 rounded-3xl flex items-center justify-center mx-auto text-rowina-blue border border-zinc-700 shadow-inner">
+              {requiresOtp ? <Fingerprint size={40} /> : isForgotPassword ? <Key size={40} /> : <Shield size={40} />}
             </div>
 
-            <div className="flex bg-zinc-900 rounded-2xl p-1 border border-zinc-800">
-              <button 
-                onClick={() => { setAuthMethod('email'); setLoginError(null); }}
-                className={cn(
-                  "flex-1 py-2 rounded-xl text-[10px] rowina-mono transition-all",
-                  authMethod === 'email' ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
-                )}
-              >
-                EMAIL
-              </button>
-              <button 
-                onClick={() => { setAuthMethod('phone'); setLoginError(null); }}
-                className={cn(
-                  "flex-1 py-2 rounded-xl text-[10px] rowina-mono transition-all",
-                  authMethod === 'phone' ? "bg-zinc-800 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
-                )}
-              >
-                PHONE
-              </button>
-            </div>
-
-            {authMethod === 'email' ? (
-              <form onSubmit={handleEmailAuth} className="space-y-4">
-                {authMode === 'signup' && (
-                  <div className="space-y-2 text-left">
-                    <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Username</label>
-                    <input 
-                      type="text" 
-                      placeholder="YOUR USERNAME" 
-                      value={emailForm.username}
-                      onChange={e => setEmailForm({ ...emailForm, username: e.target.value })}
-                      className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                    />
+            <div className="space-y-6">
+              {requiresOtp ? (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-bold text-white">Security Check</h2>
+                    <p className="text-zinc-500 text-sm leading-relaxed">Two-Factor Authentication is active. Enter the 6-digit code from your app.</p>
                   </div>
-                )}
-                <div className="space-y-2 text-left">
-                  <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Email Address</label>
+                  
                   <input 
-                    type="email" 
-                    placeholder="EMAIL@EXAMPLE.COM" 
-                    value={emailForm.email}
-                    onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
-                    className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
+                    type="text" 
+                    maxLength={6}
+                    placeholder="000000" 
+                    value={otpToken}
+                    onChange={e => setOtpToken(e.target.value.replace(/\D/g, ''))}
+                    className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-3xl text-center tracking-[0.4em] font-bold text-rowina-blue focus:border-rowina-blue outline-none transition-all placeholder:text-zinc-900 shadow-inner"
                   />
-                </div>
-                <div className="space-y-2 text-left">
-                  <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Password</label>
-                  <input 
-                    type="password" 
-                    placeholder="••••••••" 
-                    value={emailForm.password}
-                    onChange={e => setEmailForm({ ...emailForm, password: e.target.value })}
-                    className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                  />
-                </div>
 
-                {loginError && (
-                  <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
-                    {loginError}
-                  </p>
-                )}
-
-                <button 
-                  type="submit"
-                  disabled={isLoggingIn}
-                  className={cn(
-                    "w-full py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
-                    isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
+                  {loginError && (
+                    <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl">
+                      <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
+                    </div>
                   )}
+
+                  <button 
+                    onClick={handleVerifyOtp}
+                    disabled={isLoggingIn || otpToken.length !== 6}
+                    className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20 disabled:opacity-30 disabled:grayscale"
+                  >
+                    {isLoggingIn ? 'Verifying Identity...' : 'Confirm Identity'}
+                  </button>
+
+                  <button 
+                    onClick={() => { setRequiresOtp(false); setPendingUser(null); setLoginError(null); }}
+                    className="text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-[0.2em] transition-all"
+                  >
+                    ← Terminate Session
+                  </button>
+                </div>
+              ) : isForgotPassword ? (
+                <div className="space-y-6">
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-bold text-white">Recovery Link</h2>
+                    <p className="text-zinc-500 text-sm leading-relaxed">We'll transmit a secure reset vector to your registered email address.</p>
+                  </div>
+
+                  {resetSent ? (
+                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-8 rounded-3xl space-y-4">
+                       <CheckCircle size={40} className="mx-auto text-emerald-500" />
+                       <p className="text-emerald-500 text-xs font-bold rowina-mono uppercase leading-relaxed tracking-wider">
+                         Reset package transmitted successfully. Please inspect your inbox.
+                       </p>
+                    </div>
+                  ) : (
+                    <div className="space-y-4 text-left">
+                      <div className="space-y-2">
+                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Vector</label>
+                        <input 
+                          type="email" 
+                          placeholder="EMAIL@DOMAIN.COM" 
+                          value={emailForm.email}
+                          onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                        />
+                      </div>
+
+                      {loginError && (
+                        <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center">
+                          <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
+                        </div>
+                      )}
+
+                      <button 
+                        onClick={handleForgotPassword}
+                        disabled={isLoggingIn}
+                        className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg"
+                      >
+                        {isLoggingIn ? 'Transmitting...' : 'Send Recovery Vector'}
+                      </button>
+                    </div>
+                  )}
+
+                  <button 
+                    onClick={() => { setIsForgotPassword(false); setResetSent(false); setLoginError(null); }}
+                    className="text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-[0.2em] transition-all"
+                  >
+                    ← Back to Authentication
+                  </button>
+                </div>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <h2 className="text-2xl font-bold text-white">{authMode === 'login' ? 'System Access' : 'Create Protocol'}</h2>
+                    <p className="text-zinc-500 text-sm leading-relaxed">{authMode === 'login' ? 'Identify for system clearance.' : 'Initiate a new sales management profile.'}</p>
+                  </div>
+
+                  <form onSubmit={handleEmailAuth} className="space-y-4 text-left">
+                    {authMode === 'signup' && (
+                      <div className="space-y-2">
+                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Operator Designation</label>
+                        <input 
+                          type="text" 
+                          placeholder="FULL NAME / ID" 
+                          value={emailForm.username}
+                          onChange={e => setEmailForm({ ...emailForm, username: e.target.value })}
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Address</label>
+                      <input 
+                        type="email" 
+                        placeholder="EMAIL@DOMAIN.COM" 
+                        value={emailForm.email}
+                        onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
+                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <div className="flex justify-between items-center px-2">
+                        <label className="text-[10px] rowina-mono text-zinc-600 uppercase font-bold tracking-widest">Access Key</label>
+                        {authMode === 'login' && (
+                          <button 
+                            type="button"
+                            onClick={() => setIsForgotPassword(true)}
+                            className="text-[10px] rowina-mono text-rowina-blue/60 hover:text-rowina-blue uppercase transition-colors"
+                          >
+                            Lost Key?
+                          </button>
+                        )}
+                      </div>
+                      <div className="relative">
+                        <input 
+                          type={showPassword ? "text" : "password"} 
+                          placeholder="••••••••" 
+                          value={emailForm.password}
+                          onChange={e => setEmailForm({ ...emailForm, password: e.target.value })}
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all pr-12 shadow-inner"
+                        />
+                        <button 
+                          type="button"
+                          onClick={() => setShowPassword(!showPassword)}
+                          className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                        >
+                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                        </button>
+                      </div>
+                    </div>
+
+                    {loginError && (
+                      <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center">
+                        <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
+                      </div>
+                    )}
+
+                    <button 
+                      type="submit"
+                      disabled={isLoggingIn}
+                      className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20"
+                    >
+                      {isLoggingIn ? 'Authenticating...' : authMode === 'login' ? 'Authorize Session' : 'Establish Protocol'}
+                    </button>
+                  </form>
+                </>
+              )}
+            </div>
+
+            {!requiresOtp && !isForgotPassword && (
+              <div className="pt-8 border-t border-zinc-800 mt-8 space-y-6">
+                <div className="flex items-center gap-4 text-zinc-700">
+                  <div className="flex-1 h-[1px] bg-zinc-800" />
+                  <span className="text-[10px] rowina-mono uppercase tracking-[0.3em]">OR</span>
+                  <div className="flex-1 h-[1px] bg-zinc-800" />
+                </div>
+                
+                <button 
+                  onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
+                  className="w-full bg-zinc-900 border border-zinc-800 py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all text-xs font-bold rowina-mono uppercase tracking-widest text-zinc-300 shadow-inner"
                 >
-                  {isLoggingIn ? 'PROCESSING...' : authMode === 'login' ? 'SIGN IN' : 'REGISTER'}
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5 grayscale opacity-70" />
+                  Continue with Google
                 </button>
-              </form>
-            ) : (
-              <div className="space-y-4">
-                {!confirmationResult ? (
-                  <form onSubmit={handleSendCode} className="space-y-4">
-                    <div className="space-y-2 text-left">
-                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Phone Number</label>
-                      <input 
-                        type="tel" 
-                        placeholder="+254 700 000 000" 
-                        value={phoneNumber}
-                        onChange={e => setPhoneNumber(e.target.value)}
-                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                      />
-                    </div>
-                    {loginError && (
-                      <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
-                        {loginError}
-                      </p>
-                    )}
-                    <div id="recaptcha-container"></div>
-                    <button 
-                      type="submit"
-                      disabled={isLoggingIn}
-                      className={cn(
-                        "w-full py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
-                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
-                      )}
-                    >
-                      {isLoggingIn ? 'SENDING...' : 'SEND SMS CODE'}
-                    </button>
-                  </form>
-                ) : (
-                  <form onSubmit={handleVerifyCode} className="space-y-4">
-                    <div className="space-y-2 text-left">
-                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">Verification Code</label>
-                      <input 
-                        type="text" 
-                        placeholder="123456" 
-                        value={verificationCode}
-                        onChange={e => setVerificationCode(e.target.value)}
-                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                      />
-                    </div>
-                    {loginError && (
-                      <p className="text-rose-500 text-[10px] rowina-mono uppercase text-center animate-pulse">
-                        {loginError}
-                      </p>
-                    )}
-                    <button 
-                      type="submit"
-                      disabled={isLoggingIn}
-                      className={cn(
-                        "w-full py-4 rounded-2xl font-bold rowina-mono text-sm tracking-widest transition-all",
-                        isLoggingIn ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "rowina-pill-active"
-                      )}
-                    >
-                      {isLoggingIn ? 'VERIFYING...' : 'VERIFY CODE'}
-                    </button>
-                    <button 
-                      type="button"
-                      onClick={() => setConfirmationResult(null)}
-                      className="w-full text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
-                    >
-                      Change Number
-                    </button>
-                  </form>
-                )}
+
+                <div className="pt-4 flex flex-col gap-4">
+                  <button 
+                    onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginError(null); }}
+                    className="text-[10px] rowina-mono text-zinc-500 hover:text-white transition-all uppercase tracking-widest flex items-center justify-center gap-2"
+                  >
+                    {authMode === 'login' ? "Don't have an ID? Establish Protocol" : "Existing Operator? Authorize"}
+                  </button>
+                  
+                  <button 
+                    onClick={() => setShowAuthScreen(false)}
+                    className="text-[10px] rowina-mono text-zinc-700 hover:text-zinc-400 transition-all uppercase tracking-widest"
+                  >
+                    Continue as Auxiliary (Guest)
+                  </button>
+                </div>
               </div>
             )}
-
-            <div className="flex items-center gap-4">
-              <div className="h-px flex-1 bg-zinc-800" />
-              <span className="text-[8px] rowina-mono text-zinc-600 uppercase">OR</span>
-              <div className="h-px flex-1 bg-zinc-800" />
-            </div>
-
-            <button 
-              onClick={handleLogin}
-              disabled={isLoggingIn}
-              className="w-full bg-zinc-800 text-white py-4 rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:bg-zinc-700 transition-all flex items-center justify-center gap-3"
-            >
-              <img src="https://www.google.com/favicon.ico" className="w-4 h-4" alt="Google" />
-              CONTINUE WITH GOOGLE
-            </button>
-
-            {isStandalone && (
-              <p className="text-[8px] rowina-mono text-zinc-500 uppercase text-center tracking-widest leading-relaxed">
-                {isIOS 
-                  ? "Note: Google Sign-in may be restricted in iOS Standalone mode. Use Email/Phone if issues persist."
-                  : "Note: If Google Sign-in fails, ensure popups are allowed or use Email/Phone authentication."}
-              </p>
-            )}
-
-            <div className="pt-2 flex flex-col gap-4">
-              <button 
-                onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
-                className="text-[10px] rowina-mono text-rowina-blue uppercase tracking-widest hover:underline"
-              >
-                {authMode === 'login' ? "Don't have an account? Register" : "Already have an account? Sign In"}
-              </button>
-              <button 
-                onClick={() => setShowAuthScreen(false)}
-                className="text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest hover:text-white transition-all"
-              >
-                Continue as Guest
-              </button>
-            </div>
           </div>
           
           <p className="text-[10px] rowina-mono text-zinc-700 uppercase tracking-widest">
@@ -2636,7 +2792,7 @@ export default function App() {
 
             <div className="space-y-4 mt-8">
               <div className="flex justify-between items-center">
-                <h3 className="rowina-mono text-xs font-bold text-zinc-500">RECENT LOGS</h3>
+                <h3 className="rowina-mono text-xs font-bold text-zinc-500 uppercase tracking-widest">Recent Activity</h3>
                 <div className="flex gap-2">
                   <button onClick={() => requireAuth(() => setIsSaleModalOpen(true))} className="text-[10px] rowina-mono text-rowina-blue border border-rowina-blue/30 px-3 py-1 rounded-full hover:bg-rowina-blue/10 transition-all">ADD SALE</button>
                   <button onClick={() => requireAuth(() => setIsExpenseModalOpen(true))} className="text-[10px] rowina-mono text-zinc-500 border border-zinc-800 px-3 py-1 rounded-full hover:bg-white/5 transition-all">ADD EXPENSE</button>
@@ -3370,14 +3526,14 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="pt-4 border-t border-zinc-800/50">
-                      <p className="rowina-mono text-[8px] text-zinc-600 uppercase mb-3 tracking-widest">Recent Ledger Entries</p>
-                      <div className="space-y-2">
-                        {clientTransactions
-                          .filter(t => t.clientId === client.id)
-                          .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
-                          .slice(0, 3)
-                          .map(t => (
+                      <div className="pt-4 border-t border-zinc-800/50">
+                        <p className="rowina-mono text-[8px] text-zinc-600 uppercase mb-3 tracking-widest">Client Ledger (Recent)</p>
+                        <div className="space-y-2">
+                          {clientTransactions
+                            .filter(t => t.clientId === client.id)
+                            .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
+                            .slice(0, 3)
+                            .map(t => (
                             <div key={t.id} className="flex justify-between items-center text-[10px] rowina-mono">
                               <div className="flex items-center gap-2">
                                 <span className={cn(
@@ -3522,14 +3678,52 @@ export default function App() {
             exit={{ opacity: 0, y: -10 }}
             className="space-y-8"
           >
-            <div className="flex justify-between items-center">
-              <h2 className="text-2xl font-bold rowina-title">Alert Command</h2>
-              <button 
-                onClick={() => setIsAlertModalOpen(true)}
-                className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
-              >
-                <Plus size={20} />
-              </button>
+            <div className="flex justify-between items-center bg-rowina-gray p-6 rounded-[32px] border border-zinc-800">
+               <div>
+                <h2 className="text-2xl font-bold rowina-title leading-tight">Surveillance Center</h2>
+                <div className="flex items-center gap-2 mt-1">
+                  <div className={cn("w-1.5 h-1.5 rounded-full", userProfile?.notificationsEnabled !== false ? "bg-emerald-500 animate-pulse" : "bg-rose-500")} />
+                  <p className="rowina-mono text-[8px] text-zinc-500 uppercase tracking-[0.2em]">
+                    System {userProfile?.notificationsEnabled !== false ? 'Live' : 'Paused'}
+                  </p>
+                </div>
+              </div>
+              
+              <div className="flex items-center gap-4">
+                <div className="flex flex-col items-end gap-1.5 mr-2">
+                   <p className="rowina-mono text-[8px] text-zinc-600 uppercase tracking-widest font-bold">Alert Feed</p>
+                   <button 
+                    onClick={async () => {
+                      if (!userProfile) return;
+                      const next = userProfile.notificationsEnabled === false;
+                      try {
+                        await updateDoc(doc(db, 'users', userProfile.id), { notificationsEnabled: next });
+                        setUserProfile({ ...userProfile, notificationsEnabled: next });
+                      } catch (err) {
+                        handleFirestoreError(err, OperationType.UPDATE, 'users');
+                      }
+                    }}
+                    className={cn(
+                      "w-12 h-6 rounded-full relative transition-all duration-500",
+                      userProfile?.notificationsEnabled !== false ? "bg-emerald-500/20 text-emerald-500" : "bg-zinc-800 text-zinc-600"
+                    )}
+                  >
+                    <div className={cn(
+                      "absolute top-1 w-4 h-4 rounded-full transition-all duration-300",
+                      userProfile?.notificationsEnabled !== false ? "right-1 bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.5)]" : "left-1 bg-zinc-600"
+                    )} />
+                  </button>
+                </div>
+
+                <div className="h-10 w-[1px] bg-zinc-800 mx-1" />
+
+                <button 
+                  onClick={() => setIsAlertModalOpen(true)}
+                  className="w-12 h-12 rounded-2xl rowina-pill-active flex items-center justify-center hover:scale-105 active:scale-95 transition-all shadow-xl"
+                >
+                  <Plus size={24} />
+                </button>
+              </div>
             </div>
 
             {/* Triggered Alerts Section */}
@@ -3659,6 +3853,126 @@ export default function App() {
             <div className="space-y-2">
               <h2 className="text-2xl font-bold rowina-title">Security Settings</h2>
               <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest mt-1">Configure App Lock & Access</p>
+            </div>
+
+            <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4 text-rowina-blue">
+                  <Fingerprint size={32} />
+                  <div>
+                    <h3 className="text-white font-bold text-lg">Two-Factor Authentication (2FA)</h3>
+                    <p className="text-zinc-500 text-xs max-w-md">Add an extra layer of security using Google Authenticator or any TOTP compatible app.</p>
+                  </div>
+                </div>
+                <div className={cn(
+                  "px-3 py-1 rounded-full text-[8px] rowina-mono font-bold uppercase tracking-widest",
+                  userProfile?.otpEnabled ? "bg-emerald-500/10 text-emerald-500" : "bg-zinc-800 text-zinc-500"
+                )}>
+                  {userProfile?.otpEnabled ? "Protected" : "Vulnerable"}
+                </div>
+              </div>
+
+              <div className="space-y-6">
+                {userProfile?.otpEnabled ? (
+                  <div className="bg-emerald-500/5 border border-emerald-500/10 p-6 rounded-3xl space-y-4">
+                    <div className="flex items-start gap-4">
+                      <div className="w-10 h-10 rounded-xl bg-emerald-500/20 flex items-center justify-center text-emerald-500">
+                        <CheckCircle size={24} />
+                      </div>
+                      <div className="space-y-1">
+                        <p className="text-white text-sm font-bold">Authentication Protocol Active</p>
+                        <p className="text-zinc-500 text-xs">Your account is secured with biometric-grade TOTP verification. Every login now mandates a unique verification vector.</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={handleDisableOtp}
+                      className="w-full py-4 rounded-xl font-bold rowina-mono text-[9px] tracking-[0.2em] text-rose-500 hover:bg-rose-500/10 transition-all border border-rose-500/10 uppercase"
+                    >
+                      Deactivate 2FA Protocol
+                    </button>
+                  </div>
+                ) : otpSetupStep === 'QR' ? (
+                  <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[32px] space-y-8 text-center animate-in fade-in zoom-in-95">
+                    <div className="space-y-2">
+                       <h4 className="text-white font-bold rowina-mono text-xs uppercase tracking-widest">Scan Secure Vector</h4>
+                       <p className="text-zinc-500 text-[10px] leading-relaxed">Use Google Authenticator to scan this QR code. It contains your unique encrypted secret key.</p>
+                    </div>
+                    
+                    <div className="bg-white p-4 rounded-3xl inline-block mx-auto shadow-2xl">
+                      <img src={otpQrCode} alt="OTP QR Code" className="w-48 h-48" />
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-zinc-600 text-[8px] rowina-mono uppercase tracking-widest">Manual Entry Sequence:</p>
+                      <code className="text-rowina-blue text-xs font-mono break-all bg-black/40 p-2 rounded-lg block border border-zinc-800">
+                        {otpSecretRaw.split(':')[1]?.substring(0, 32)}...
+                      </code>
+                    </div>
+
+                    <button 
+                      onClick={() => setOtpSetupStep('VERIFY')}
+                      className="w-full py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest uppercase rowina-pill-active shadow-lg shadow-rowina-blue/20"
+                    >
+                      Vector Scanned Successfully →
+                    </button>
+                  </div>
+                ) : otpSetupStep === 'VERIFY' ? (
+                  <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-[32px] space-y-8 text-center animate-in slide-in-from-right-4">
+                    <div className="space-y-2">
+                       <h4 className="text-white font-bold rowina-mono text-xs uppercase tracking-widest">Validation Test</h4>
+                       <p className="text-zinc-500 text-[10px] leading-relaxed">Enter the 6-digit code currently displayed in your Authenticator app to confirm link.</p>
+                    </div>
+
+                    <input 
+                      type="text" 
+                      maxLength={6}
+                      placeholder="000000"
+                      value={otpToken}
+                      onChange={e => setOtpToken(e.target.value.replace(/\D/g, ''))}
+                      className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-3xl text-center tracking-[0.4em] font-bold text-rowina-blue focus:border-rowina-blue outline-none transition-all placeholder:text-zinc-900 shadow-inner"
+                    />
+
+                    {otpVerifyError && (
+                      <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl">
+                        <p className="text-rose-500 text-[8px] rowina-mono font-bold uppercase tracking-widest">{otpVerifyError}</p>
+                      </div>
+                    )}
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <button 
+                        onClick={() => setOtpSetupStep('QR')}
+                        className="py-4 rounded-2xl font-bold rowina-mono text-[9px] tracking-widest uppercase text-zinc-500 border border-zinc-800"
+                      >
+                        ← Back to QR
+                      </button>
+                      <button 
+                        onClick={handleConfirmOtpSetup}
+                        disabled={isLoggingIn || otpToken.length !== 6}
+                        className="py-4 rounded-2xl font-bold rowina-mono text-[9px] tracking-widest uppercase rowina-pill-active disabled:opacity-30"
+                      >
+                        {isLoggingIn ? 'Validating...' : 'Verify & Activate'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button 
+                    onClick={handleSetupOtp}
+                    disabled={isLoggingIn}
+                    className="w-full flex items-center justify-center gap-4 bg-zinc-900 border border-zinc-800 py-6 rounded-3xl hover:border-rowina-blue transition-all group shadow-inner"
+                  >
+                    <div className="w-12 h-12 bg-rowina-blue/10 rounded-2xl flex items-center justify-center text-rowina-blue group-hover:scale-110 transition-transform">
+                      <Shield size={24} />
+                    </div>
+                    <div className="text-left">
+                      <p className="text-white font-bold text-sm">Initiate 2FA Protocol</p>
+                      <p className="text-zinc-600 text-[10px] rowina-mono uppercase tracking-widest">Upgrade account defensive matrix</p>
+                    </div>
+                    <div className="ml-auto mr-4 text-zinc-700">
+                      <ChevronRight size={20} />
+                    </div>
+                  </button>
+                )}
+              </div>
             </div>
 
             <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">

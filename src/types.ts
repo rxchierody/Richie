@@ -117,6 +117,9 @@ export interface UserProfile {
   displayName: string;
   assignedStoreIds?: string[];
   ownerId?: string;
+  notificationsEnabled?: boolean;
+  otpSecret?: string;
+  otpEnabled?: boolean;
 }
 
 export interface DocumentItem {
