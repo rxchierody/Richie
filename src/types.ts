@@ -118,3 +118,39 @@ export interface UserProfile {
   assignedStoreIds?: string[];
   ownerId?: string;
 }
+
+export interface DocumentItem {
+  productId: string;
+  quantity: number;
+  price: number;
+  name: string;
+}
+
+export interface Quotation {
+  id: string;
+  userId: string;
+  storeId: string;
+  clientId?: string;
+  clientName: string;
+  date: string;
+  expiryDate?: string;
+  items: DocumentItem[];
+  totalAmount: number;
+  notes?: string;
+  status: 'Draft' | 'Sent' | 'Accepted' | 'Declined';
+}
+
+export interface Invoice {
+  id: string;
+  userId: string;
+  storeId: string;
+  clientId?: string;
+  clientName: string;
+  date: string;
+  dueDate?: string;
+  items: DocumentItem[];
+  totalAmount: number;
+  paidAmount: number;
+  status: 'Pending' | 'Partial' | 'Paid' | 'Overdue';
+  notes?: string;
+}

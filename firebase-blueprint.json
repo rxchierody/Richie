@@ -146,6 +146,43 @@
       },
       "required": ["email", "role"]
     },
+    "Quotation": {
+      "title": "Quotation",
+      "description": "Sales quotes",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "storeId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "expiryDate": { "type": "string" },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "notes": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["userId", "storeId", "clientName", "date", "items", "totalAmount", "status"]
+    },
+    "Invoice": {
+      "title": "Invoice",
+      "description": "Payment requests",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "storeId": { "type": "string" },
+        "clientId": { "type": "string" },
+        "clientName": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "dueDate": { "type": "string" },
+        "items": { "type": "array" },
+        "totalAmount": { "type": "number" },
+        "paidAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "notes": { "type": "string" }
+      },
+      "required": ["userId", "storeId", "clientName", "date", "items", "totalAmount", "paidAmount", "status"]
+    },
     "SystemSettings": {
       "title": "SystemSettings",
       "description": "Global application settings",
@@ -192,6 +229,14 @@
     "/triggeredAlerts/{alertId}": {
       "schema": "TriggeredAlert",
       "description": "Fired alerts"
+    },
+    "/quotations/{quotationId}": {
+      "schema": "Quotation",
+      "description": "Sales quotations"
+    },
+    "/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Sales invoices"
     },
     "/users/{userId}": {
       "schema": "UserProfile",

@@ -39,7 +39,8 @@ import {
   Download,
   Lock,
   Key,
-  Fingerprint
+  Fingerprint,
+  Printer
 } from 'lucide-react';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
@@ -76,7 +77,7 @@ import {
   isToday,
   isValid
 } from 'date-fns';
-import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile } from './types';
+import { Product, Sale, Expense, ExpenseCategory, PaymentMethod, AlertRule, TriggeredAlert, AlertType, Restock, UserRole, Client, ClientTransaction, Store, UserProfile, Quotation, Invoice, DocumentItem } from './types';
 import { cn, formatCurrency, calculateMarkup, calculateMargin, round, EAST_AFRICAN_CURRENCIES } from './lib/utils';
 import { auth, db } from './firebase';
 import { 
@@ -104,10 +105,11 @@ import {
   getDocs,
   getDocFromServer,
   writeBatch,
+  increment,
   Timestamp
 } from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'calendar' | 'alerts' | 'clients' | 'reports' | 'staff' | 'stores' | 'security' | 'help';
+type Tab = 'portfolio' | 'store' | 'clients' | 'calendar' | 'documents' | 'reports' | 'alerts' | 'staff' | 'stores' | 'security' | 'help';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 enum OperationType {
@@ -268,6 +270,7 @@ export default function App() {
   const [showAuthScreen, setShowAuthScreen] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
+  const [documentSubTab, setDocumentSubTab] = useState<'RECEIPTS' | 'INVOICES' | 'QUOTATIONS'>('RECEIPTS');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
@@ -319,6 +322,8 @@ export default function App() {
   const [restocks, setRestocks] = useState<Restock[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [clientTransactions, setClientTransactions] = useState<ClientTransaction[]>([]);
+  const [quotations, setQuotations] = useState<Quotation[]>([]);
+  const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [alerts, setAlerts] = useState<AlertRule[]>([]);
   const [triggeredAlerts, setTriggeredAlerts] = useState<TriggeredAlert[]>([]);
   const [confirmModal, setConfirmModal] = useState<{
@@ -351,6 +356,8 @@ export default function App() {
   const [isRestockModalOpen, setIsRestockModalOpen] = useState(false);
   const [isAlertModalOpen, setIsAlertModalOpen] = useState(false);
   const [isClientModalOpen, setIsClientModalOpen] = useState(false);
+  const [isQuotationModalOpen, setIsQuotationModalOpen] = useState(false);
+  const [isInvoiceModalOpen, setIsInvoiceModalOpen] = useState(false);
   const [isClientTransactionModalOpen, setIsClientTransactionModalOpen] = useState(false);
   const [isStaffModalOpen, setIsStaffModalOpen] = useState(false);
   const [isStoreModalOpen, setIsStoreModalOpen] = useState(false);
@@ -368,7 +375,28 @@ export default function App() {
   const [expenseForm, setExpenseForm] = useState<Partial<Expense>>({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
   const [restockForm, setRestockForm] = useState<Partial<Restock>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
   const [clientForm, setClientForm] = useState<Partial<Client>>({ name: '', phone: '', totalDebt: undefined });
-  const [clientTransactionForm, setClientTransactionForm] = useState<Partial<ClientTransaction>>({ date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined });
+  const [clientTransactionForm, setClientTransactionForm] = useState<Partial<ClientTransaction>>({ 
+    date: format(new Date(), 'yyyy-MM-dd'), 
+    type: 'CREDIT', 
+    amount: undefined, 
+    description: '', 
+    clientId: '',
+  });
+  const [quotationForm, setQuotationForm] = useState<Partial<Quotation>>({
+    clientName: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    items: [],
+    status: 'Draft',
+    totalAmount: 0
+  });
+  const [invoiceForm, setInvoiceForm] = useState<Partial<Invoice>>({
+    clientName: '',
+    date: format(new Date(), 'yyyy-MM-dd'),
+    items: [],
+    status: 'Pending',
+    totalAmount: 0,
+    paidAmount: 0
+  });
   const [alertForm, setAlertForm] = useState<Partial<AlertRule>>({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
   const [staffForm, setStaffForm] = useState<{ email: string; role: UserRole; displayName: string; assignedStoreIds: string[] }>({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
   const [storeForm, setStoreForm] = useState<Partial<Store>>({ name: '', location: '' });
@@ -379,6 +407,7 @@ export default function App() {
   const [modalSearch, setModalSearch] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [productsSearch, setProductsSearch] = useState('');
+  const [receiptsSearch, setReceiptsSearch] = useState('');
 
   useEffect(() => {
     if (globalError) {
@@ -591,6 +620,14 @@ export default function App() {
       setRestocks(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Restock)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'restocks'));
 
+    const unsubQuotations = onSnapshot(getQuery('quotations'), (snapshot) => {
+      setQuotations(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Quotation)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'quotations'));
+
+    const unsubInvoices = onSnapshot(getQuery('invoices'), (snapshot) => {
+      setInvoices(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Invoice)));
+    }, (err) => handleFirestoreError(err, OperationType.LIST, 'invoices'));
+
     const unsubClients = onSnapshot(getQuery('clients'), (snapshot) => {
       setClients(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Client)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'clients'));
@@ -630,6 +667,8 @@ export default function App() {
       unsubSales();
       unsubExpenses();
       unsubRestocks();
+      unsubQuotations();
+      unsubInvoices();
       unsubClients();
       unsubTransactions();
       unsubAlerts();
@@ -1137,13 +1176,23 @@ export default function App() {
       const batch = writeBatch(db);
       const colRef = collection(db, 'clientTransactions');
       const newDocRef = doc(colRef);
-      const transactionData = {
-        ...clientTransactionForm,
+      const transactionData: any = {
+        date: clientTransactionForm.date || format(new Date(), 'yyyy-MM-dd'),
+        type: clientTransactionForm.type || 'CREDIT',
+        description: clientTransactionForm.description || '',
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-        amount: clientTransactionForm.amount || 0,
+        amount: Number(clientTransactionForm.amount) || 0,
         clientId: selectedClient.id
       };
+      
+      if (clientTransactionForm.productId) {
+        transactionData.productId = clientTransactionForm.productId;
+      }
+      
+      if (clientTransactionForm.quantity !== undefined && clientTransactionForm.quantity !== null) {
+        transactionData.quantity = Number(clientTransactionForm.quantity);
+      }
       
       batch.set(newDocRef, transactionData);
       
@@ -1168,13 +1217,273 @@ export default function App() {
       await batch.commit();
       
       setClientTransactionForm({
-        date: format(new Date(), 'yyyy-MM-dd'), type: 'CREDIT', amount: undefined, description: '', clientId: '', quantity: undefined
+        date: format(new Date(), 'yyyy-MM-dd'), 
+        type: 'CREDIT', 
+        amount: undefined, 
+        description: '', 
+        clientId: '', 
       });
       setIsClientTransactionModalOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to record transaction";
       setGlobalError(msg);
       handleFirestoreError(err, OperationType.CREATE, 'clientTransactions');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddQuotation = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setGlobalError(null);
+    try {
+      if (!quotationForm.clientName) throw new Error("Client name is required.");
+      if (!quotationForm.items || quotationForm.items.length === 0) throw new Error("At least one item is required.");
+
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      const colRef = collection(db, 'quotations');
+      const newDocRef = doc(colRef);
+      
+      // We don't create a client or debt for quotations yet, 
+      // as they are just estimates until converted.
+      await setDoc(newDocRef, {
+        ...quotationForm,
+        userId: userProfile?.ownerId || user?.uid,
+        storeId,
+      });
+
+      setQuotationForm({
+        clientName: '',
+        clientId: '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        items: [],
+        status: 'Draft',
+        totalAmount: 0
+      });
+      setIsQuotationModalOpen(false);
+    } catch (err) {
+      setGlobalError(err instanceof Error ? err.message : "Failed to save quotation");
+      handleFirestoreError(err, OperationType.CREATE, 'quotations');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleAddInvoice = async () => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    setGlobalError(null);
+    try {
+      if (!invoiceForm.clientName) throw new Error("Client name is required.");
+      if (!invoiceForm.items || invoiceForm.items.length === 0) throw new Error("At least one item is required.");
+
+      const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
+      if (!storeId) throw new Error("Please select or create a store first.");
+
+      const userId = userProfile?.ownerId || user?.uid;
+      const batch = writeBatch(db);
+      
+      let finalClientId = invoiceForm.clientId;
+
+      // 1. Check if client exists, if not create one
+      if (!finalClientId) {
+        const clientRef = doc(collection(db, 'clients'));
+        finalClientId = clientRef.id;
+        batch.set(clientRef, {
+          name: invoiceForm.clientName,
+          email: '',
+          phone: 'N/A', // Required by rules
+          address: '',
+          totalDebt: 0,
+          userId,
+          storeId,
+          createdAt: format(new Date(), 'yyyy-MM-dd') // Required by rules
+        });
+      }
+
+      const colRef = collection(db, 'invoices');
+      const newDocRef = doc(colRef);
+      const invoiceData = {
+        ...invoiceForm,
+        clientId: finalClientId,
+        userId,
+        storeId,
+      };
+      
+      batch.set(newDocRef, invoiceData);
+
+      // 2. Add to client ledger and update debt
+      const balance = (invoiceForm.totalAmount || 0) - (invoiceForm.paidAmount || 0);
+      if (balance > 0) {
+        batch.update(doc(db, 'clients', finalClientId), {
+          totalDebt: increment(balance)
+        });
+        
+        const transRef = doc(collection(db, 'clientTransactions'));
+        batch.set(transRef, {
+          date: format(new Date(), 'yyyy-MM-dd'),
+          type: 'CREDIT',
+          amount: balance,
+          description: `Invoice generated: #${newDocRef.id.slice(0, 5)}`,
+          clientId: finalClientId,
+          userId,
+          storeId
+        });
+      }
+
+      await batch.commit();
+
+      setInvoiceForm({
+        clientName: '',
+        clientId: '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        items: [],
+        status: 'Pending',
+        totalAmount: 0,
+        paidAmount: 0
+      });
+      setIsInvoiceModalOpen(false);
+    } catch (err) {
+      setGlobalError(err instanceof Error ? err.message : "Failed to save invoice");
+      handleFirestoreError(err, OperationType.CREATE, 'invoices');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handleConvertQuotationToInvoice = async (quotation: Quotation) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const batch = writeBatch(db);
+      const colRef = collection(db, 'invoices');
+      const newDocRef = doc(colRef);
+      const userId = quotation.userId;
+      const storeId = quotation.storeId;
+      
+      let finalClientId = quotation.clientId;
+
+      // 1. Create client if it doesn't exist
+      if (!finalClientId) {
+        const clientRef = doc(collection(db, 'clients'));
+        finalClientId = clientRef.id;
+        batch.set(clientRef, {
+          name: quotation.clientName,
+          email: '',
+          phone: 'N/A', // Required by rules
+          address: '',
+          totalDebt: 0,
+          userId,
+          storeId,
+          createdAt: format(new Date(), 'yyyy-MM-dd') // Required by rules
+        });
+      }
+
+      const invoiceData = {
+        clientName: quotation.clientName,
+        clientId: finalClientId || '',
+        date: format(new Date(), 'yyyy-MM-dd'),
+        items: quotation.items,
+        totalAmount: quotation.totalAmount,
+        paidAmount: 0,
+        status: 'Pending',
+        userId,
+        storeId
+      };
+      
+      batch.set(newDocRef, invoiceData);
+      
+      // 2. Update quotation status
+      batch.update(doc(db, 'quotations', quotation.id), { status: 'Accepted' });
+      
+      // 3. Update client debt and ledger
+      batch.update(doc(db, 'clients', finalClientId), {
+        totalDebt: increment(quotation.totalAmount)
+      });
+      
+      const transRef = doc(collection(db, 'clientTransactions'));
+      batch.set(transRef, {
+        date: format(new Date(), 'yyyy-MM-dd'),
+        type: 'CREDIT',
+        amount: quotation.totalAmount,
+        description: `Invoice generated from Quotation #${quotation.id.slice(0, 5)}`,
+        clientId: finalClientId,
+        userId,
+        storeId
+      });
+      
+      await batch.commit();
+      setDocumentSubTab('INVOICES');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.CREATE, 'invoices');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const handlePayInvoice = async (invoice: Invoice) => {
+    if (isSubmitting) return;
+    setIsSubmitting(true);
+    try {
+      const batch = writeBatch(db);
+      
+      // 1. Update Invoice Status
+      batch.update(doc(db, 'invoices', invoice.id), { 
+        status: 'Paid',
+        paidAmount: invoice.totalAmount
+      });
+      
+      // 2. Reduce Client Debt if linked
+      if (invoice.clientId) {
+        const client = clients.find(c => c.id === invoice.clientId);
+        if (client) {
+          batch.update(doc(db, 'clients', client.id), {
+            totalDebt: Math.max(0, (client.totalDebt || 0) - invoice.totalAmount)
+          });
+          
+          // Add payment transaction
+          const transRef = doc(collection(db, 'clientTransactions'));
+          batch.set(transRef, {
+            date: format(new Date(), 'yyyy-MM-dd'),
+            type: 'PAYMENT',
+            amount: invoice.totalAmount,
+            description: `Payment for Invoice #${invoice.id.slice(0, 5)}`,
+            clientId: client.id,
+            userId: invoice.userId,
+            storeId: invoice.storeId
+          });
+        }
+      }
+      
+      // 3. Create Sale records and update Stock for each item
+      for (const item of invoice.items) {
+        const product = products.find(p => p.id === item.productId);
+        if (product) {
+          const saleRef = doc(collection(db, 'sales'));
+          batch.set(saleRef, {
+            date: format(new Date(), 'yyyy-MM-dd'),
+            productId: item.productId,
+            quantity: item.quantity,
+            sellingPrice: item.price,
+            buyingPrice: product.buyingPrice,
+            discount: 0,
+            paymentMethod: 'Cash',
+            userId: invoice.userId,
+            storeId: invoice.storeId
+          });
+          
+          batch.update(doc(db, 'products', product.id), {
+            stockQuantity: product.stockQuantity - item.quantity
+          });
+        }
+      }
+      
+      await batch.commit();
+    } catch (err) {
+      handleFirestoreError(err, OperationType.UPDATE, `invoices/${invoice.id}`);
     } finally {
       setIsSubmitting(false);
     }
@@ -1536,7 +1845,11 @@ export default function App() {
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     if (isLoggingIn) return;
-    if (!emailForm.email || !emailForm.password) {
+    
+    const email = emailForm.email.trim();
+    const password = emailForm.password.trim();
+    
+    if (!email || !password) {
       setLoginError("EMAIL AND PASSWORD REQUIRED");
       return;
     }
@@ -1545,20 +1858,20 @@ export default function App() {
     setLoginError(null);
     try {
       if (authMode === 'login') {
-        await signInWithEmailAndPassword(auth, emailForm.email, emailForm.password);
+        await signInWithEmailAndPassword(auth, email, password);
       } else {
         if (!emailForm.username) {
           setLoginError("USERNAME REQUIRED FOR REGISTRATION");
           setIsLoggingIn(false);
           return;
         }
-        const userCredential = await createUserWithEmailAndPassword(auth, emailForm.email, emailForm.password);
+        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
         // Set display name in profile
         await updateProfile(userCredential.user, { displayName: emailForm.username });
         // Also update Firestore profile
         await setDoc(doc(db, 'users', userCredential.user.uid), {
           id: userCredential.user.uid,
-          email: emailForm.email,
+          email: email,
           role: 'employee',
           displayName: emailForm.username,
           assignedStoreIds: []
@@ -1567,14 +1880,18 @@ export default function App() {
       setShowAuthScreen(false);
     } catch (error: any) {
       console.error("Email auth failed:", error);
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError("INVALID EMAIL OR PASSWORD");
       } else if (error.code === 'auth/email-already-in-use') {
         setLoginError("EMAIL ALREADY REGISTERED");
       } else if (error.code === 'auth/weak-password') {
         setLoginError("PASSWORD TOO WEAK (MIN 6 CHARS)");
+      } else if (error.code === 'auth/operation-not-allowed') {
+        setLoginError("EMAIL/PASSWORD AUTH NOT ENABLED. USE GOOGLE.");
+      } else if (error.code === 'auth/too-many-requests') {
+        setLoginError("TOO MANY ATTEMPTS. TRY AGAIN LATER.");
       } else {
-        setLoginError("AUTHENTICATION FAILED");
+        setLoginError(error.message?.toUpperCase() || "AUTHENTICATION FAILED");
       }
     } finally {
       setIsLoggingIn(false);
@@ -2142,6 +2459,7 @@ export default function App() {
           { id: 'store', label: 'STORE' },
           { id: 'clients', label: 'CLIENTS' },
           { id: 'calendar', label: 'CALENDAR' },
+          { id: 'documents', label: 'DOCUMENTS' },
           { id: 'reports', label: 'REPORTS' },
           { id: 'alerts', label: 'ALERTS' },
           { id: 'staff', label: 'STAFF' },
@@ -2781,6 +3099,190 @@ export default function App() {
                   </div>
                 </div>
               </motion.div>
+            )}
+          </motion.div>
+        )}
+
+        {activeTab === 'documents' && (
+          <motion.div
+            key="documents"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -10 }}
+            className="space-y-8"
+          >
+            <div className="flex justify-between items-center">
+              <h2 className="text-2xl font-bold rowina-title">Business Documents</h2>
+              <div className="flex gap-2">
+                <button 
+                  onClick={() => requireAuth(() => {
+                    setQuotationForm({
+                      clientName: '',
+                      date: format(new Date(), 'yyyy-MM-dd'),
+                      items: [],
+                      status: 'Draft',
+                      totalAmount: 0
+                    });
+                    setIsQuotationModalOpen(true);
+                  })}
+                  className="bg-zinc-800 text-white px-4 py-2 rounded-full font-bold rowina-mono text-[9px] tracking-widest hover:bg-rowina-blue hover:text-black transition-all"
+                >
+                  NEW QUOTE
+                </button>
+                <button 
+                  onClick={() => requireAuth(() => {
+                    setInvoiceForm({
+                      clientName: '',
+                      date: format(new Date(), 'yyyy-MM-dd'),
+                      items: [],
+                      status: 'Pending',
+                      totalAmount: 0,
+                      paidAmount: 0
+                    });
+                    setIsInvoiceModalOpen(true);
+                  })}
+                  className="bg-zinc-800 text-white px-4 py-2 rounded-full font-bold rowina-mono text-[9px] tracking-widest hover:bg-emerald-500 hover:text-black transition-all"
+                >
+                  NEW INVOICE
+                </button>
+              </div>
+            </div>
+
+            <div className="flex gap-4 border-b border-zinc-800 pb-2">
+               {['RECEIPTS', 'INVOICES', 'QUOTATIONS'].map(sub => (
+                 <button
+                   key={sub}
+                   onClick={() => setDocumentSubTab(sub as any)}
+                   className={cn(
+                     "pb-2 rowina-mono text-[10px] font-bold tracking-widest transition-all px-2",
+                     documentSubTab === sub ? "text-rowina-blue border-b-2 border-rowina-blue" : "text-zinc-500 hover:text-zinc-300"
+                   )}
+                 >
+                   {sub}
+                 </button>
+               ))}
+            </div>
+
+            {documentSubTab === 'RECEIPTS' && (
+              <div className="space-y-4">
+                <div className="relative">
+                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-500" size={16} />
+                  <input 
+                    type="text" 
+                    placeholder="SEARCH RECEIPTS..." 
+                    value={receiptsSearch}
+                    onChange={e => setReceiptsSearch(e.target.value)}
+                    className="w-full bg-rowina-gray border border-zinc-800 rounded-2xl pl-12 pr-6 py-3 text-xs rowina-mono outline-none"
+                  />
+                </div>
+                <div className="grid gap-4">
+                  {sales
+                    .filter(sale => {
+                      const product = products.find(p => p.id === sale.productId);
+                      return product?.name.toLowerCase().includes(receiptsSearch.toLowerCase()) || sale.paymentMethod.toLowerCase().includes(receiptsSearch.toLowerCase());
+                    })
+                    .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
+                    .map(sale => {
+                      const product = products.find(p => p.id === sale.productId);
+                      return (
+                        <div key={sale.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center group">
+                          <div>
+                            <p className="rowina-mono text-[8px] text-zinc-500 uppercase mb-1">{format(parseISO(sale.date), 'MMMM dd, yyyy')}</p>
+                            <h4 className="font-bold text-white text-lg">{product?.name || 'Unknown Item'}</h4>
+                            <p className="rowina-mono text-[10px] text-zinc-500 uppercase">METHOD: {sale.paymentMethod} • QTY: {sale.quantity}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xl font-bold text-rowina-blue">{f(sale.quantity * sale.sellingPrice - sale.discount)}</p>
+                            <button className="rowina-mono text-[8px] font-bold text-zinc-600 mt-2 hover:text-rowina-blue flex items-center gap-1 ml-auto">
+                              <Printer size={10} /> PRINT RECEIPT
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  {sales.length === 0 && <p className="text-center py-12 text-zinc-600 rowina-mono text-xs italic">NO RECEIPTS FOUND</p>}
+                </div>
+              </div>
+            )}
+
+            {documentSubTab === 'INVOICES' && (
+              <div className="space-y-4">
+                <div className="grid gap-4">
+                  {invoices
+                    .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
+                    .map(inv => (
+                      <div key={inv.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                             <p className="rowina-mono text-[8px] text-zinc-500 uppercase">{format(parseISO(inv.date), 'MMM dd, yyyy')}</p>
+                             <span className={cn(
+                               "text-[7px] font-bold px-1.5 py-0.5 rounded rowina-mono uppercase",
+                               inv.status === 'Paid' ? "bg-emerald-500/20 text-emerald-500" : 
+                               inv.status === 'Overdue' ? "bg-rose-500/20 text-rose-500" : "bg-rowina-blue/20 text-rowina-blue"
+                             )}>
+                               {inv.status}
+                             </span>
+                          </div>
+                          <h4 className="font-bold text-white text-lg">{inv.clientName}</h4>
+                          <p className="rowina-mono text-[10px] text-zinc-500 uppercase">{inv.items.length} ITEMS • BAL: {f(inv.totalAmount - inv.paidAmount)}</p>
+                        </div>
+                          <div className="text-right">
+                          <p className="text-xl font-bold text-white">{f(inv.totalAmount)}</p>
+                          <div className="flex gap-2 mt-2 justify-end">
+                            <button className="p-1 px-2 bg-zinc-800 rounded hover:bg-rowina-blue transition-all"><Printer size={12} /></button>
+                            {inv.status !== 'Paid' && (
+                              <button 
+                                onClick={() => handlePayInvoice(inv)}
+                                className="p-1 px-2 bg-zinc-800 rounded hover:bg-emerald-500 transition-all text-[8px] rowina-mono font-bold"
+                              >
+                                PAY
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  {invoices.length === 0 && <p className="text-center py-12 text-zinc-600 rowina-mono text-xs italic">NO INVOICES FOUND</p>}
+                </div>
+              </div>
+            )}
+
+            {documentSubTab === 'QUOTATIONS' && (
+              <div className="space-y-4">
+                <div className="grid gap-4">
+                  {quotations
+                    .sort((a, b) => parseISO(b.date).getTime() - parseISO(a.date).getTime())
+                    .map(q => (
+                      <div key={q.id} className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center">
+                        <div>
+                          <div className="flex items-center gap-2 mb-1">
+                             <p className="rowina-mono text-[8px] text-zinc-500 uppercase">{format(parseISO(q.date), 'MMM dd, yyyy')}</p>
+                             <span className="text-[7px] font-bold px-1.5 py-0.5 rounded rowina-mono uppercase bg-zinc-800 text-zinc-400">
+                               {q.status}
+                             </span>
+                          </div>
+                          <h4 className="font-bold text-white text-lg">{q.clientName}</h4>
+                          <p className="rowina-mono text-[10px] text-zinc-500 uppercase">{q.items.length} ITEMS • EXPIRES: {q.expiryDate || 'N/A'}</p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-xl font-bold text-white">{f(q.totalAmount)}</p>
+                          <div className="flex gap-2 mt-2 justify-end">
+                            <button className="p-1 px-2 bg-zinc-800 rounded hover:bg-rowina-blue transition-all"><Printer size={12} /></button>
+                            {q.status !== 'Accepted' && (
+                              <button 
+                                onClick={() => handleConvertQuotationToInvoice(q)}
+                                className="p-1 px-2 bg-zinc-800 rounded hover:bg-emerald-500 transition-all text-[8px] rowina-mono font-bold"
+                              >
+                                CONVERT
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  {quotations.length === 0 && <p className="text-center py-12 text-zinc-600 rowina-mono text-xs italic">NO QUOTATIONS FOUND</p>}
+                </div>
+              </div>
             )}
           </motion.div>
         )}
@@ -3602,9 +4104,9 @@ export default function App() {
 
       {/* Modals (Simplified for token limit, but functional) */}
       <AnimatePresence>
-        {(isProductModalOpen || isSaleModalOpen || isExpenseModalOpen || isRestockModalOpen || isAlertModalOpen || isClientModalOpen || isClientTransactionModalOpen || isStaffModalOpen || isStoreModalOpen || isSupportModalOpen) && (
+        {(isProductModalOpen || isSaleModalOpen || isExpenseModalOpen || isRestockModalOpen || isAlertModalOpen || isClientModalOpen || isClientTransactionModalOpen || isStaffModalOpen || isStoreModalOpen || isSupportModalOpen || isQuotationModalOpen || isInvoiceModalOpen) && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setIsSupportModalOpen(false); setModalSearch(''); }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setIsSupportModalOpen(false); setIsQuotationModalOpen(false); setIsInvoiceModalOpen(false); setModalSearch(''); }} className="absolute inset-0 bg-black/90 backdrop-blur-md" />
             <motion.div 
               initial={{ y: 30, opacity: 0, scale: 0.98 }} 
               animate={{ y: 0, opacity: 1, scale: 1 }} 
@@ -3622,12 +4124,249 @@ export default function App() {
                    isClientModalOpen ? 'NEW CLIENT' : 
                    isStaffModalOpen ? (editingStaff ? 'EDIT STAFF' : 'NEW STAFF') : 
                    isStoreModalOpen ? (editingStore ? 'EDIT STORE' : 'NEW STORE') : 
+                   isQuotationModalOpen ? 'NEW QUOTE' :
+                   isInvoiceModalOpen ? 'NEW INVOICE' :
                    isSupportModalOpen ? 'SUPPORT' : 'ADJUST DEBT'}
                 </h3>
-                <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setIsSupportModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
+                <button onClick={() => { setIsProductModalOpen(false); setIsSaleModalOpen(false); setIsExpenseModalOpen(false); setIsRestockModalOpen(false); setIsAlertModalOpen(false); setIsClientModalOpen(false); setIsClientTransactionModalOpen(false); setIsStaffModalOpen(false); setIsStoreModalOpen(false); setIsSupportModalOpen(false); setIsQuotationModalOpen(false); setIsInvoiceModalOpen(false); setModalSearch(''); }} className="text-zinc-500 hover:text-white"><X size={24} /></button>
               </div>
               
               <div className="space-y-6 max-h-[60vh] overflow-y-auto pr-2 custom-scrollbar">
+                {isInvoiceModalOpen && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">CLIENT</label>
+                      <div className="flex gap-2">
+                        <select 
+                          className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none"
+                          onChange={(e) => {
+                            const client = clients.find(c => c.id === e.target.value);
+                            if (client) setInvoiceForm({ ...invoiceForm, clientName: client.name, clientId: client.id });
+                          }}
+                        >
+                          <option value="">SELECT EXISTING CLIENT</option>
+                          {clients.map(c => (
+                            <option key={c.id} value={c.id} selected={invoiceForm.clientId === c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                        <input 
+                          type="text" 
+                          placeholder="OR TYPE NAME" 
+                          value={invoiceForm.clientName} 
+                          onChange={e => setInvoiceForm({ ...invoiceForm, clientName: e.target.value, clientId: '' })} 
+                          className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">ITEMS</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                        {invoiceForm.items?.map((item, idx) => (
+                          <div key={idx} className="flex justify-between items-center bg-rowina-black p-3 rounded-xl border border-zinc-900">
+                             <div>
+                               <p className="text-xs font-bold text-white">{item.name}</p>
+                               <div className="flex items-center gap-2 mt-1">
+                                 <input 
+                                   type="number" 
+                                   value={item.quantity}
+                                   onChange={(e) => {
+                                     const items = [...(invoiceForm.items || [])];
+                                     items[idx].quantity = Number(e.target.value);
+                                     const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                     setInvoiceForm({ ...invoiceForm, items, totalAmount: total });
+                                   }}
+                                   className="w-16 bg-zinc-800 rounded px-2 py-1 text-[10px] rowina-mono"
+                                 />
+                                 <span className="text-[8px] rowina-mono text-zinc-500 uppercase">@ {f(item.price)}</span>
+                               </div>
+                             </div>
+                             <div className="text-right flex items-center gap-4">
+                               <p className="text-[10px] font-bold text-white">{f(item.price * item.quantity)}</p>
+                               <button onClick={() => {
+                                 const items = [...(invoiceForm.items || [])];
+                                 items.splice(idx, 1);
+                                 const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                 setInvoiceForm({ ...invoiceForm, items, totalAmount: total });
+                               }} className="text-zinc-600 hover:text-rose-500 transition-colors"><X size={14} /></button>
+                             </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="SEARCH STORE ITEMS..." 
+                          value={modalSearch}
+                          onChange={e => setModalSearch(e.target.value)}
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl pl-12 pr-6 py-4 text-sm focus:border-rowina-blue outline-none"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-2 custom-scrollbar border border-zinc-900 rounded-xl p-2 bg-black/20">
+                        {products
+                          .filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()) || p.category.toLowerCase().includes(modalSearch.toLowerCase()))
+                          .map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                const exists = invoiceForm.items?.find(i => i.productId === p.id);
+                                if (exists) return;
+                                const items = [...(invoiceForm.items || []), { productId: p.id, name: p.name, price: p.sellingPrice, quantity: 1 }];
+                                const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                setInvoiceForm({ ...invoiceForm, items, totalAmount: total });
+                                setModalSearch('');
+                              }}
+                              className="w-full text-left px-4 py-3 text-[10px] rowina-mono group flex justify-between items-center hover:bg-zinc-800/50 rounded-xl transition-all"
+                            >
+                              <div>
+                                <p className="text-zinc-400 group-hover:text-white font-bold">{p.name}</p>
+                                <p className="text-[8px] text-zinc-600 uppercase">{p.category}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-rowina-blue">{f(p.sellingPrice)}</p>
+                                <p className="text-[10px] text-zinc-500 uppercase">STOCK: {p.stockQuantity}</p>
+                              </div>
+                            </button>
+                          ))
+                        }
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                       <div className="space-y-2">
+                         <label className="text-[10px] rowina-mono text-zinc-500 ml-2">PAID AMOUNT</label>
+                         <input type="number" value={invoiceForm.paidAmount ?? 0} onChange={e => setInvoiceForm({ ...invoiceForm, paidAmount: Number(e.target.value) })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" />
+                       </div>
+                       <div className="space-y-2">
+                         <label className="text-[10px] rowina-mono text-zinc-500 ml-2">STATUS</label>
+                         <select value={invoiceForm.status} onChange={e => setInvoiceForm({ ...invoiceForm, status: e.target.value as any })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none">
+                            <option value="Pending">PENDING</option>
+                            <option value="Partial">PARTIAL</option>
+                            <option value="Paid">PAID</option>
+                         </select>
+                       </div>
+                    </div>
+                    <div className="flex justify-between items-center pt-4 border-t border-zinc-800">
+                      <div>
+                        <p className="rowina-mono text-[10px] text-zinc-500 uppercase">INVOICE TOTAL</p>
+                        <p className="text-[8px] rowina-mono text-zinc-600 uppercase">BALANCE: {f((invoiceForm.totalAmount || 0) - (invoiceForm.paidAmount || 0))}</p>
+                      </div>
+                      <p className="text-3xl font-bold text-emerald-500">{f(invoiceForm.totalAmount || 0)}</p>
+                    </div>
+                    <button onClick={handleAddInvoice} disabled={isSubmitting} className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active">
+                      {isSubmitting ? 'PROCESSING...' : 'GENERATE INVOICE'}
+                    </button>
+                  </div>
+                )}
+
+                {isQuotationModalOpen && (
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">CLIENT</label>
+                      <div className="flex gap-2">
+                        <select 
+                          className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none"
+                          onChange={(e) => {
+                            const client = clients.find(c => c.id === e.target.value);
+                            if (client) setQuotationForm({ ...quotationForm, clientName: client.name, clientId: client.id });
+                          }}
+                        >
+                          <option value="">SELECT EXISTING CLIENT</option>
+                          {clients.map(c => (
+                            <option key={c.id} value={c.id} selected={quotationForm.clientId === c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                        <input 
+                          type="text" 
+                          placeholder="OR TYPE NAME" 
+                          value={quotationForm.clientName} 
+                          onChange={e => setQuotationForm({ ...quotationForm, clientName: e.target.value, clientId: '' })} 
+                          className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">ITEMS</label>
+                      <div className="space-y-2 max-h-40 overflow-y-auto pr-2">
+                        {quotationForm.items?.map((item, idx) => (
+                          <div key={idx} className="flex justify-between items-center bg-rowina-black p-3 rounded-xl border border-zinc-900">
+                             <div>
+                               <p className="text-xs font-bold text-white">{item.name}</p>
+                               <div className="flex items-center gap-2 mt-1">
+                                 <input 
+                                   type="number" 
+                                   value={item.quantity}
+                                   onChange={(e) => {
+                                     const items = [...(quotationForm.items || [])];
+                                     items[idx].quantity = Number(e.target.value);
+                                     const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                     setQuotationForm({ ...quotationForm, items, totalAmount: total });
+                                   }}
+                                   className="w-16 bg-zinc-800 rounded px-2 py-1 text-[10px] rowina-mono"
+                                 />
+                                 <span className="text-[8px] rowina-mono text-zinc-500 uppercase ml-2">@ {f(item.price)}</span>
+                               </div>
+                             </div>
+                             <div className="text-right flex items-center gap-4">
+                               <p className="text-[10px] font-bold text-white">{f(item.price * item.quantity)}</p>
+                               <button onClick={() => {
+                                 const items = [...(quotationForm.items || [])];
+                                 items.splice(idx, 1);
+                                 const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                 setQuotationForm({ ...quotationForm, items, totalAmount: total });
+                               }} className="text-zinc-600 hover:text-rose-500 transition-colors"><X size={14} /></button>
+                             </div>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-zinc-600" size={16} />
+                        <input 
+                          type="text" 
+                          placeholder="SEARCH STORE ITEMS..." 
+                          value={modalSearch}
+                          onChange={e => setModalSearch(e.target.value)}
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl pl-12 pr-6 py-4 text-sm focus:border-rowina-blue outline-none"
+                        />
+                      </div>
+                      <div className="max-h-48 overflow-y-auto space-y-1 pr-2 custom-scrollbar border border-zinc-900 rounded-xl p-2 bg-black/20">
+                        {products
+                          .filter(p => p.name.toLowerCase().includes(modalSearch.toLowerCase()) || p.category.toLowerCase().includes(modalSearch.toLowerCase()))
+                          .map(p => (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                const exists = quotationForm.items?.find(i => i.productId === p.id);
+                                if (exists) return;
+                                const items = [...(quotationForm.items || []), { productId: p.id, name: p.name, price: p.sellingPrice, quantity: 1 }];
+                                const total = items.reduce((acc, i) => acc + (i.price * i.quantity), 0);
+                                setQuotationForm({ ...quotationForm, items, totalAmount: total });
+                                setModalSearch('');
+                              }}
+                              className="w-full text-left px-4 py-3 text-[10px] rowina-mono group flex justify-between items-center hover:bg-zinc-800/50 rounded-xl transition-all"
+                            >
+                              <div>
+                                <p className="text-zinc-400 group-hover:text-white font-bold">{p.name}</p>
+                                <p className="text-[8px] text-zinc-600 uppercase">{p.category}</p>
+                              </div>
+                              <div className="text-right">
+                                <p className="font-bold text-rowina-blue">{f(p.sellingPrice)}</p>
+                                <p className="text-[10px] text-zinc-500 uppercase">STOCK: {p.stockQuantity}</p>
+                              </div>
+                            </button>
+                          ))
+                        }
+                      </div>
+                    </div>
+                    <div className="flex justify-between items-center pt-4 border-t border-zinc-800">
+                      <p className="rowina-mono text-[10px] text-zinc-500 uppercase">QUOTATION ESTIMATE</p>
+                      <p className="text-3xl font-bold text-rowina-blue">{f(quotationForm.totalAmount || 0)}</p>
+                    </div>
+                    <button onClick={handleAddQuotation} disabled={isSubmitting} className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active">
+                      {isSubmitting ? 'PROCESSING...' : 'GENERATE QUOTATION'}
+                    </button>
+                  </div>
+                )}
+
                 {isStoreModalOpen && (
                   <>
                     <div className="space-y-2">

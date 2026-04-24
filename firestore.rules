@@ -225,12 +225,14 @@ service cloud.firestore {
     }
 
     function isValidClient(data) {
-      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'phone', 'totalDebt', 'createdAt']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'phone', 'email', 'address', 'totalDebt', 'createdAt']) &&
         hasRequiredFields(['userId', 'storeId', 'name', 'phone', 'totalDebt', 'createdAt']) &&
         data.userId == getAccountOwnerId() &&
         data.storeId is string &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         data.phone is string && data.phone.size() <= 20 &&
+        (!('address' in data) || (data.address is string && data.address.size() <= 200)) &&
+        (!('email' in data) || (data.email is string && data.email.size() <= 100)) &&
         data.totalDebt is number &&
         isValidDateString(data.createdAt);
     }
@@ -268,6 +270,29 @@ service cloud.firestore {
         data.message is string && data.message.size() <= 500 &&
         isValidDateString(data.timestamp) &&
         data.isRead is bool;
+    }
+
+    function isValidQuotation(data) {
+      return hasOnlyAllowedFields(['userId', 'storeId', 'clientId', 'clientName', 'date', 'expiryDate', 'items', 'totalAmount', 'notes', 'status']) &&
+        hasRequiredFields(['userId', 'storeId', 'clientName', 'date', 'items', 'totalAmount', 'status']) &&
+        data.userId == getAccountOwnerId() &&
+        data.storeId is string &&
+        isValidDateString(data.date) &&
+        data.items is list &&
+        data.totalAmount is number &&
+        data.status is string;
+    }
+
+    function isValidInvoice(data) {
+      return hasOnlyAllowedFields(['userId', 'storeId', 'clientId', 'clientName', 'date', 'dueDate', 'items', 'totalAmount', 'paidAmount', 'status', 'notes']) &&
+        hasRequiredFields(['userId', 'storeId', 'clientName', 'date', 'items', 'totalAmount', 'paidAmount', 'status']) &&
+        data.userId == getAccountOwnerId() &&
+        data.storeId is string &&
+        isValidDateString(data.date) &&
+        data.items is list &&
+        data.totalAmount is number &&
+        data.paidAmount is number &&
+        data.status is string;
     }
 
     function isValidSettings(data) {
@@ -358,6 +383,20 @@ service cloud.firestore {
       allow update: if isAccountMember(resource.data.userId) && isValidTriggeredAlert(request.resource.data) &&
                       request.resource.data.ruleId == resource.data.ruleId &&
                       request.resource.data.timestamp == resource.data.timestamp && userIdUnchanged();
+      allow delete: if isAccountMember(resource.data.userId);
+    }
+    
+    match /quotations/{quotationId} {
+      allow read: if isAccountMember(resource.data.userId);
+      allow create: if isAuthenticated() && isValidQuotation(request.resource.data);
+      allow update: if isAccountMember(resource.data.userId) && isValidQuotation(request.resource.data) && userIdUnchanged();
+      allow delete: if isAccountMember(resource.data.userId);
+    }
+    
+    match /invoices/{invoiceId} {
+      allow read: if isAccountMember(resource.data.userId);
+      allow create: if isAuthenticated() && isValidInvoice(request.resource.data);
+      allow update: if isAccountMember(resource.data.userId) && isValidInvoice(request.resource.data) && userIdUnchanged();
       allow delete: if isAccountMember(resource.data.userId);
     }
 
