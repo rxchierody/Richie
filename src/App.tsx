@@ -2201,8 +2201,8 @@ export default function App() {
               {requiresOtp ? (
                 <div className="space-y-6">
                   <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">Security Check</h2>
-                    <p className="text-zinc-500 text-sm leading-relaxed">Two-Factor Authentication is active. Enter the 6-digit code from your app.</p>
+                    <h2 className="text-2xl font-bold text-white">Security Code</h2>
+                    <p className="text-zinc-500 text-sm leading-relaxed">Enter the 6-digit code from your authenticator app.</p>
                   </div>
                   
                   <input 
@@ -2225,37 +2225,37 @@ export default function App() {
                     disabled={isLoggingIn || otpToken.length !== 6}
                     className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20 disabled:opacity-30 disabled:grayscale"
                   >
-                    {isLoggingIn ? 'Verifying Identity...' : 'Confirm Identity'}
+                    {isLoggingIn ? 'Verifying...' : 'Confirm Code'}
                   </button>
 
                   <button 
                     onClick={() => { setRequiresOtp(false); setPendingUser(null); setLoginError(null); }}
                     className="text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-[0.2em] transition-all"
                   >
-                    ← Terminate Session
+                    ← Cancel
                   </button>
                 </div>
               ) : isForgotPassword ? (
                 <div className="space-y-6">
                   <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">Recovery Link</h2>
-                    <p className="text-zinc-500 text-sm leading-relaxed">We'll transmit a secure reset vector to your registered email address.</p>
+                    <h2 className="text-2xl font-bold text-white">Reset Password</h2>
+                    <p className="text-zinc-500 text-sm leading-relaxed">We will send a reset link to your email address.</p>
                   </div>
 
                   {resetSent ? (
                     <div className="bg-emerald-500/10 border border-emerald-500/20 p-8 rounded-3xl space-y-4">
                        <CheckCircle size={40} className="mx-auto text-emerald-500" />
                        <p className="text-emerald-500 text-xs font-bold rowina-mono uppercase leading-relaxed tracking-wider">
-                         Reset package transmitted successfully. Please inspect your inbox.
+                         Email sent! Please check your inbox.
                        </p>
                     </div>
                   ) : (
                     <div className="space-y-4 text-left">
                       <div className="space-y-2">
-                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Vector</label>
+                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Address</label>
                         <input 
                           type="email" 
-                          placeholder="EMAIL@DOMAIN.COM" 
+                          placeholder="your@email.com" 
                           value={emailForm.email}
                           onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
                           className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
@@ -2273,7 +2273,7 @@ export default function App() {
                         disabled={isLoggingIn}
                         className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg"
                       >
-                        {isLoggingIn ? 'Transmitting...' : 'Send Recovery Vector'}
+                        {isLoggingIn ? 'Sending...' : 'Send Reset Link'}
                       </button>
                     </div>
                   )}
@@ -2282,23 +2282,23 @@ export default function App() {
                     onClick={() => { setIsForgotPassword(false); setResetSent(false); setLoginError(null); }}
                     className="text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-[0.2em] transition-all"
                   >
-                    ← Back to Authentication
+                    ← Back to Login
                   </button>
                 </div>
               ) : (
                 <>
                   <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">{authMode === 'login' ? 'System Access' : 'Create Protocol'}</h2>
-                    <p className="text-zinc-500 text-sm leading-relaxed">{authMode === 'login' ? 'Identify for system clearance.' : 'Initiate a new sales management profile.'}</p>
+                    <h2 className="text-2xl font-bold text-white">{authMode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
+                    <p className="text-zinc-500 text-sm leading-relaxed">{authMode === 'login' ? 'Sign in to access your sales data.' : 'Sign up to start tracking your business.'}</p>
                   </div>
 
                   <form onSubmit={handleEmailAuth} className="space-y-4 text-left">
                     {authMode === 'signup' && (
                       <div className="space-y-2">
-                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Operator Designation</label>
+                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Your Name</label>
                         <input 
                           type="text" 
-                          placeholder="FULL NAME / ID" 
+                          placeholder="Enter your name" 
                           value={emailForm.username}
                           onChange={e => setEmailForm({ ...emailForm, username: e.target.value })}
                           className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
@@ -2309,7 +2309,7 @@ export default function App() {
                       <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Address</label>
                       <input 
                         type="email" 
-                        placeholder="EMAIL@DOMAIN.COM" 
+                        placeholder="your@email.com" 
                         value={emailForm.email}
                         onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
                         className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
@@ -2317,14 +2317,14 @@ export default function App() {
                     </div>
                     <div className="space-y-2">
                       <div className="flex justify-between items-center px-2">
-                        <label className="text-[10px] rowina-mono text-zinc-600 uppercase font-bold tracking-widest">Access Key</label>
+                        <label className="text-[10px] rowina-mono text-zinc-600 uppercase font-bold tracking-widest">Password</label>
                         {authMode === 'login' && (
                           <button 
                             type="button"
                             onClick={() => setIsForgotPassword(true)}
                             className="text-[10px] rowina-mono text-rowina-blue/60 hover:text-rowina-blue uppercase transition-colors"
                           >
-                            Lost Key?
+                            Forgot?
                           </button>
                         )}
                       </div>
@@ -2357,7 +2357,7 @@ export default function App() {
                       disabled={isLoggingIn}
                       className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20"
                     >
-                      {isLoggingIn ? 'Authenticating...' : authMode === 'login' ? 'Authorize Session' : 'Establish Protocol'}
+                      {isLoggingIn ? 'Loading...' : authMode === 'login' ? 'Sign In' : 'Sign Up'}
                     </button>
                   </form>
                 </>
@@ -3905,7 +3905,7 @@ export default function App() {
                     <div className="space-y-2">
                       <p className="text-zinc-600 text-[8px] rowina-mono uppercase tracking-widest">Manual Entry Sequence:</p>
                       <code className="text-rowina-blue text-xs font-mono break-all bg-black/40 p-2 rounded-lg block border border-zinc-800">
-                        {otpSecretRaw.split(':')[1]?.substring(0, 32)}...
+                        {otpSecretRaw?.includes(':') ? otpSecretRaw.split(':')[1]?.substring(0, 32) : 'GENERATING...'}...
                       </code>
                     </div>
 
