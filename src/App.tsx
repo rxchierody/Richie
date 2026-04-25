@@ -652,6 +652,17 @@ export default function App() {
       if (selectedStoreId !== 'ALL') {
         return query(baseQuery, where('storeId', '==', selectedStoreId));
       }
+      // If non-executive and ALL is selected, we must filter by assigned stores to satisfy rules and requirements
+      if (userRole !== 'executive' && userProfile?.assignedStoreIds) {
+        if (userProfile.assignedStoreIds.length > 0) {
+          // Firebase 'in' operator supports up to 30 values
+          const limitedStoreIds = userProfile.assignedStoreIds.slice(0, 30);
+          return query(baseQuery, where('storeId', 'in', limitedStoreIds));
+        } else {
+          // No stores assigned, return a query that will yield no results for storeId
+          return query(baseQuery, where('storeId', '==', 'NONE_ASSIGNED'));
+        }
+      }
       return baseQuery;
     };
 
@@ -1988,33 +1999,43 @@ export default function App() {
     setIsLoggingIn(true);
     setLoginError(null);
 
+    const emailLower = email.trim().toLowerCase();
+
     try {
       if (authMode === 'login') {
         let userCredential;
         try {
-          userCredential = await signInWithEmailAndPassword(auth, email, password);
+          userCredential = await signInWithEmailAndPassword(auth, emailLower, password);
         } catch (error: any) {
-          // If login fails, check if this is a pre-authorized staff member with a temporary password
-          if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-            const staffDoc = await getDoc(doc(db, 'users', email.toLowerCase()));
-            if (staffDoc.exists() && staffDoc.data()?.tempPassword === password) {
-              // Create the auth account automatically for the staff
-              try {
-                userCredential = await createUserWithEmailAndPassword(auth, email, password);
-                if (staffDoc.data()?.displayName) {
-                  await updateProfile(userCredential.user, { displayName: staffDoc.data().displayName });
-                }
-              } catch (createErr: any) {
-                if (createErr.code === 'auth/email-already-in-use') {
-                  throw error; // Re-throw original "invalid account details" error
-                }
-                throw createErr;
+          // Check if this is a staff bypass case
+          const staffDocPath = doc(db, 'users', emailLower);
+          const staffDoc = await getDoc(staffDocPath);
+          
+          if (staffDoc.exists() && staffDoc.data()?.tempPassword === password) {
+            try {
+              userCredential = await createUserWithEmailAndPassword(auth, emailLower, password);
+              if (staffDoc.data()?.displayName) {
+                await updateProfile(userCredential.user, { displayName: staffDoc.data().displayName });
               }
-            } else {
-              throw error;
+            } catch (createErr: any) {
+              if (createErr.code === 'auth/email-already-in-use') {
+                // Account exists but password was wrong. 
+                // We don't want to re-create, so we just throw if the bypass password doesn't match the one they typed
+                // (which we already checked, so this means the Auth password is different)
+                setLoginError("INVALID ACCOUNT DETAILS (Password mismatch)");
+                console.error("Auth exists but password mismatch with bypass data");
+                return;
+              }
+              throw createErr;
             }
           } else {
-            throw error;
+            // No bypass match and signIn failed
+            if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+              setLoginError("INVALID ACCOUNT DETAILS");
+            } else {
+              setLoginError(error.message || "LOGIN FAILED");
+            }
+            return;
           }
         }
         
@@ -2260,7 +2281,18 @@ export default function App() {
     return (
       <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6 sm:p-12 overflow-y-auto">
         <div className="max-w-md w-full py-12 space-y-12 text-center">
-          <div className="space-y-4">
+          <div className="space-y-4 relative">
+            {(showInstallButton || (isIOS && !isStandalone)) && (
+              <motion.button
+                initial={{ opacity: 0, scale: 0.8 }}
+                animate={{ opacity: 1, scale: 1 }}
+                onClick={handleInstallClick}
+                className="absolute -top-12 right-0 sm:-right-8 bg-zinc-900 border border-zinc-800 p-3 rounded-2xl text-rowina-blue hover:scale-105 transition-all active:scale-95 shadow-xl"
+                title="Install App"
+              >
+                <Download size={20} />
+              </motion.button>
+            )}
             <h1 className="text-6xl sm:text-8xl rowina-title font-bold text-white tracking-tight">Rowina<br />Finance</h1>
             <p className="rowina-mono text-zinc-500 text-xs tracking-[0.4em] uppercase font-bold">Secure Core v2.0</p>
           </div>
