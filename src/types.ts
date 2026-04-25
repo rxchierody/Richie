@@ -117,10 +117,10 @@ export interface UserProfile {
   displayName: string;
   assignedStoreIds?: string[];
   ownerId?: string;
-  businessName?: string;
   notificationsEnabled?: boolean;
   otpSecret?: string;
   otpEnabled?: boolean;
+  tempPassword?: string;
 }
 
 export interface DocumentItem {

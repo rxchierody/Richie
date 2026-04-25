@@ -270,8 +270,6 @@ export default function App() {
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
-  const [managerEmail, setManagerEmail] = useState('');
-  const [isStaffLogin, setIsStaffLogin] = useState(false);
   const [showAuthScreen, setShowAuthScreen] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -418,7 +416,7 @@ export default function App() {
     paidAmount: 0
   });
   const [alertForm, setAlertForm] = useState<Partial<AlertRule>>({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
-  const [staffForm, setStaffForm] = useState<{ email: string; role: UserRole; displayName: string; assignedStoreIds: string[] }>({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
+  const [staffForm, setStaffForm] = useState<{ email: string; role: UserRole; displayName: string; assignedStoreIds: string[]; tempPassword?: string }>({ email: '', role: 'employee', displayName: '', assignedStoreIds: [], tempPassword: '' });
   const [storeForm, setStoreForm] = useState<Partial<Store>>({ name: '', location: '' });
   
   const [reportDate, setReportDate] = useState(format(new Date(), 'yyyy-MM-dd'));
@@ -524,67 +522,53 @@ export default function App() {
         if (currentUser) {
           // Sync user profile/role
           const userDocRef = doc(db, 'users', currentUser.uid);
-          const emailDocRef = doc(db, 'users', (currentUser.email?.toLowerCase() || 'unknown').trim());
+          const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
           
           try {
             const userDoc = await getDoc(userDocRef);
-            let profileData: UserProfile | null = null;
-            
             if (userDoc.exists()) {
-              profileData = { ...userDoc.data() as UserProfile, id: userDoc.id };
-            }
-
-            // Always check if there's a pre-authorized role/manager by email
-            // This handles cases where an existing user is invited as staff
-            let emailDocData: UserProfile | null = null;
-            try {
-              const emailDoc = await getDoc(emailDocRef);
-              if (emailDoc.exists()) {
-                emailDocData = emailDoc.data() as UserProfile;
-                // Delete the temporary email-based doc after we read it
-                await deleteDoc(emailDocRef);
-              }
-            } catch (e) {
-              console.warn("Email-based profile check failed (expected for non-invited users):", e);
-            }
-
-            if (profileData) {
-              // If we found invitation data, merge it into the existing profile
-              if (emailDocData) {
-                const mergedProfile = {
-                  ...profileData,
-                  role: emailDocData.role === 'employee' ? 'employee' : emailDocData.role || profileData.role,
-                  ownerId: emailDocData.ownerId || profileData.ownerId,
-                  // Merge store assignments if any
-                  assignedStoreIds: Array.from(new Set([...(profileData.assignedStoreIds || []), ...(emailDocData.assignedStoreIds || [])]))
-                };
-                await updateDoc(userDocRef, mergedProfile as any);
-                profileData = mergedProfile;
-              } else if (profileData.role === 'executive' && (!profileData.ownerId || profileData.ownerId === '')) {
-                // Ensure executives own their own data
-                profileData.ownerId = currentUser.uid;
-                await updateDoc(userDocRef, { ownerId: currentUser.uid });
-              }
-              
-              setUserProfile(profileData);
-              setUserRole(profileData.role);
-              if (profileData.role === 'employee' && activeTab === 'portfolio') {
-                setActiveTab('store');
+              const data = userDoc.data() as UserProfile;
+              setUserProfile({ ...data, id: userDoc.id });
+              setUserRole(data.role);
+              // Direct employees to a useful non-restricted tab if they are on an executive-only tab
+              if (data.role === 'employee' && activeTab === 'portfolio') {
+                setActiveTab('sales');
               }
             } else {
-              // Create a brand new profile
-              let role: UserRole = 'executive'; 
+              // Check if there's a pre-authorized role by email
+              // We use a try-catch here because the email-based doc might not exist 
+              // and rules might deny access if it doesn't exist
+              let emailDocData: UserProfile | null = null;
+              try {
+                const emailDoc = await getDoc(emailDocRef);
+                if (emailDoc.exists()) {
+                  emailDocData = emailDoc.data() as UserProfile;
+                }
+              } catch (e) {
+                console.warn("Email-based profile check failed (expected for new users):", e);
+              }
+
+              let role: UserRole = 'executive'; // Default to executive for everyone to "own their own account"
               let displayName = currentUser.displayName || '';
               let assignedStoreIds: string[] = [];
               let ownerId: string | undefined = undefined;
+              let tempPassword: string | undefined = undefined;
 
               if (emailDocData) {
                 role = emailDocData.role;
                 displayName = emailDocData.displayName || displayName;
                 assignedStoreIds = emailDocData.assignedStoreIds || [];
                 ownerId = emailDocData.ownerId;
+                tempPassword = emailDocData.tempPassword;
+                // Delete the temporary email-based doc
+                try {
+                  await deleteDoc(emailDocRef);
+                } catch (e) {
+                  console.error("Failed to delete temp email doc:", e);
+                }
               }
 
+              // Create the permanent UID-based doc
               const newProfile: UserProfile = {
                 id: currentUser.uid,
                 email: currentUser.email || '',
@@ -592,6 +576,7 @@ export default function App() {
                 displayName: displayName,
                 assignedStoreIds: assignedStoreIds,
                 ownerId: ownerId || (role === 'executive' ? currentUser.uid : undefined),
+                tempPassword: tempPassword,
                 notificationsEnabled: true
               };
               await setDoc(userDocRef, newProfile);
@@ -638,24 +623,16 @@ export default function App() {
 
   // Firestore Real-time Sync
   useEffect(() => {
-    if (!isAuthReady || !user?.uid || !userProfile) return;
+    if (!isAuthReady || !user?.uid) return;
 
-      const accountId = (userProfile?.role === 'employee' ? userProfile?.ownerId : user?.uid) || user?.uid;
+    const accountId = userProfile?.ownerId || user?.uid;
 
-      console.log("Current Context:", { 
-        userRole, 
-        uid: user?.uid, 
-        ownerId: userProfile?.ownerId, 
-        accountId,
-        assignedStores: userProfile?.assignedStoreIds 
-      });
-
-      const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', accountId)), (snapshot) => {
+    const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', accountId)), (snapshot) => {
       let storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
       
-      // Filter by assigned stores for employees if they have assignments
-      if (userRole === 'employee' && userProfile?.assignedStoreIds && userProfile.assignedStoreIds.length > 0) {
-        storesData = storesData.filter(store => userProfile.assignedStoreIds?.includes(store.id));
+      // Filter stores for non-executives
+      if (userRole !== 'executive' && userProfile?.assignedStoreIds) {
+        storesData = storesData.filter(s => userProfile.assignedStoreIds?.includes(s.id));
       }
       
       setStores(storesData);
@@ -663,7 +640,7 @@ export default function App() {
       // If the selected store was deleted, or if no store is selected and we have stores
       if (selectedStoreId !== 'ALL') {
         if (!storesData.find(s => s.id === selectedStoreId)) {
-          setSelectedStoreId('ALL');
+          setSelectedStoreId(storesData.length > 0 ? storesData[0].id : 'ALL');
         }
       } else if (userRole !== 'executive' && storesData.length > 0) {
         setSelectedStoreId(storesData[0].id);
@@ -718,41 +695,11 @@ export default function App() {
       setTriggeredAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TriggeredAlert)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'triggeredAlerts'));
 
-    if (!accountId || userRole === 'employee') {
-      setStaff([]);
-      return;
-    }
-
-    // Sync staff lookups for username login
-    const syncLookups = async (staffDocs: any[]) => {
-      if (userRole !== 'executive' || !userProfile?.email) return;
-      
-      for (const s of staffDocs) {
-          if (s.displayName && s.email && s.role === 'employee') {
-            const mEmail = userProfile.email.toLowerCase().trim();
-            const uName = s.displayName.toLowerCase().trim();
-            const lookupId = `${mEmail}_${uName}`;
-            try {
-              const lookupRef = doc(db, 'staff_lookups', lookupId);
-              const lookupSnap = await getDoc(lookupRef);
-              if (!lookupSnap.exists()) {
-                await setDoc(lookupRef, { email: s.email.toLowerCase().trim() });
-                console.log("Synced lookup for:", s.displayName);
-              }
-            } catch (e) {
-              console.error("Failed to sync lookup for:", s.displayName, e);
-            }
-          }
-      }
-    };
-
     const unsubStaff = onSnapshot(query(collection(db, 'users'), where('ownerId', '==', accountId)), (snapshot) => {
-      const staffList = snapshot.docs
+      setStaff(snapshot.docs
         .map(doc => ({ ...doc.data(), id: doc.id } as any))
-        .filter(s => s.id !== user.uid);
-      
-      setStaff(staffList);
-      syncLookups(staffList);
+        .filter(s => s.id !== user.uid)
+      );
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
@@ -1050,25 +997,41 @@ export default function App() {
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
       
+      const ownerId = userProfile?.ownerId || user?.uid;
+      if (!ownerId) throw new Error("User identity not verified.");
+
       const batch = writeBatch(db);
       const newSaleDocRef = doc(collection(db, 'sales'));
+      
+      const quantityValue = Number(saleForm.quantity) || 0;
+      const discountValue = Number(saleForm.discount) || 0;
+      const sellingPriceValue = Number(product.sellingPrice) || 0;
+      const buyingPriceValue = Number(product.buyingPrice) || 0;
+
+      if (isNaN(quantityValue) || isNaN(discountValue) || isNaN(sellingPriceValue) || isNaN(buyingPriceValue)) {
+        throw new Error("Invalid numeric values detected in sale data.");
+      }
+
       const saleData = { 
         ...saleForm, 
-        userId: userProfile?.ownerId || user?.uid,
+        userId: ownerId,
         storeId,
-        quantity: saleForm.quantity || 0,
-        discount: saleForm.discount || 0,
-        sellingPrice: product.sellingPrice,
-        buyingPrice: product.buyingPrice,
+        quantity: quantityValue,
+        discount: discountValue,
+        sellingPrice: sellingPriceValue,
+        buyingPrice: buyingPriceValue,
         paymentMethod: saleForm.paymentMethod || 'Cash'
       };
       
       batch.set(newSaleDocRef, saleData);
       
-      // Update stock
+      // Update stock safely
       const productDocRef = doc(db, 'products', product.id);
+      const newStock = (Number(product.stockQuantity) || 0) - quantityValue;
+      if (isNaN(newStock)) throw new Error("Invalid stock calculation.");
+      
       batch.update(productDocRef, { 
-        stockQuantity: product.stockQuantity - (saleForm.quantity || 0) 
+        stockQuantity: newStock
       });
 
       await batch.commit();
@@ -1665,28 +1628,16 @@ export default function App() {
       if (editingStaff) {
         const docRef = doc(db, 'users', editingStaff.id);
         await updateDoc(docRef, staffForm);
-        // Update lookup
-        if (userProfile?.email) {
-          const lookupRef = doc(db, 'staff_lookups', `${userProfile.email.toLowerCase().trim()}_${staffForm.displayName.toLowerCase().trim()}`);
-          await setDoc(lookupRef, { email: staffForm.email.toLowerCase().trim() });
-        }
         setEditingStaff(null);
       } else {
         // Use email as ID for pre-authorized staff so they can be found on first login
-        const emailKey = staffForm.email.toLowerCase().trim();
-        const docRef = doc(db, 'users', emailKey);
+        const docRef = doc(db, 'users', staffForm.email.toLowerCase());
         await setDoc(docRef, {
           ...staffForm,
-          email: emailKey,
           ownerId: userProfile?.ownerId || user?.uid // Link staff to the owner of this account
         });
-        // Create lookup for username login
-        if (userProfile?.email) {
-          const lookupRef = doc(db, 'staff_lookups', `${userProfile.email.toLowerCase().trim()}_${staffForm.displayName.toLowerCase().trim()}`);
-          await setDoc(lookupRef, { email: staffForm.email.toLowerCase().trim() });
-        }
       }
-      setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
+      setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [], tempPassword: '' });
       setIsStaffModalOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save staff";
@@ -2026,49 +1977,46 @@ export default function App() {
     e.preventDefault();
     if (isLoggingIn) return;
     
-    let email = emailForm.email.trim().toLowerCase();
+    const email = emailForm.email.trim().toLowerCase();
     const password = emailForm.password;
-    const username = emailForm.username.trim();
     
+    if (!email || (authMode === 'login' ? !password : !password || !emailForm.username)) {
+      setLoginError("ALL FIELDS REQUIRED");
+      return;
+    }
+
     setIsLoggingIn(true);
     setLoginError(null);
 
     try {
-      // Staff Lookup Logic
-      if (isStaffLogin && authMode === 'login' && managerEmail) {
-        try {
-          const mEmail = managerEmail.trim().toLowerCase();
-          const uName = username.trim().toLowerCase();
-          const lookupId = `${mEmail}_${uName}`;
-          
-          console.log("Attempting staff lookup with ID:", lookupId);
-          const lookupDoc = await getDoc(doc(db, 'staff_lookups', lookupId));
-          if (lookupDoc.exists()) {
-            email = lookupDoc.data().email;
-            console.log("Found staff email via lookup:", email);
-          } else {
-            // Check if maybe they entered name differently, but stick to the ID for now
-            console.warn("Staff lookup failed for ID:", lookupId);
-            setLoginError("STAFF MEMBER NOT FOUND. ENSURE MANAGER EMAIL AND YOUR NAME MATCH THE STAFF REGISTRY.");
-            setIsLoggingIn(false);
-            return;
-          }
-        } catch (lookupErr: any) {
-          console.error("Staff lookup permission/network error:", lookupErr);
-          setLoginError("SECURITY RESTRICTION: UNABLE TO VALIDATE STAFF CREDENTIALS.");
-          setIsLoggingIn(false);
-          return;
-        }
-      }
-
-      if (!email || (authMode === 'login' ? !password : !password || !username)) {
-        setLoginError("ALL FIELDS REQUIRED");
-        setIsLoggingIn(false);
-        return;
-      }
-
       if (authMode === 'login') {
-        const userCredential = await signInWithEmailAndPassword(auth, email, password);
+        let userCredential;
+        try {
+          userCredential = await signInWithEmailAndPassword(auth, email, password);
+        } catch (error: any) {
+          // If login fails, check if this is a pre-authorized staff member with a temporary password
+          if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+            const staffDoc = await getDoc(doc(db, 'users', email.toLowerCase()));
+            if (staffDoc.exists() && staffDoc.data()?.tempPassword === password) {
+              // Create the auth account automatically for the staff
+              try {
+                userCredential = await createUserWithEmailAndPassword(auth, email, password);
+                if (staffDoc.data()?.displayName) {
+                  await updateProfile(userCredential.user, { displayName: staffDoc.data().displayName });
+                }
+              } catch (createErr: any) {
+                if (createErr.code === 'auth/email-already-in-use') {
+                  throw error; // Re-throw original "invalid account details" error
+                }
+                throw createErr;
+              }
+            } else {
+              throw error;
+            }
+          } else {
+            throw error;
+          }
+        }
         
         // 2FA Check Logic
         const userDoc = await getDoc(doc(db, 'users', userCredential.user.uid));
@@ -2090,7 +2038,7 @@ export default function App() {
       } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         setLoginError("INVALID ACCOUNT DETAILS");
       } else if (error.code === 'auth/email-already-in-use') {
-        setLoginError("ACCOUNT EXISTS. ALREADY REGISTERED? TRY LOGGING IN INSTEAD.");
+        setLoginError("EMAIL ALREADY IN USE");
       } else if (error.code === 'auth/too-many-requests') {
         setLoginError("TOO MANY ATTEMPTS. TRY AGAIN LATER.");
       } else {
@@ -2384,36 +2332,24 @@ export default function App() {
                         />
                       ) : (
                         <>
-                          {(authMode === 'signup' || (authMode === 'login' && isStaffLogin)) && (
+                          {authMode === 'signup' && (
                             <input 
                               type="text"
-                              placeholder={isStaffLogin ? "YOUR STAFF NAME" : "FULL NAME"}
+                              placeholder="FULL NAME"
                               value={emailForm.username}
                               onChange={e => setEmailForm({...emailForm, username: e.target.value})}
                               className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
                               required
                             />
                           )}
-                          {isStaffLogin && authMode === 'login' && (
-                            <input 
-                              type="email"
-                              placeholder="MANAGER'S EMAIL"
-                              value={managerEmail}
-                              onChange={e => setManagerEmail(e.target.value)}
-                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
-                              required
-                            />
-                          )}
-                          {!isStaffLogin && (
-                            <input 
-                              type="email"
-                              placeholder="EMAIL ADDRESS"
-                              value={emailForm.email}
-                              onChange={e => setEmailForm({...emailForm, email: e.target.value})}
-                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
-                              required={!isStaffLogin}
-                            />
-                          )}
+                          <input 
+                            type="email"
+                            placeholder="EMAIL ADDRESS"
+                            value={emailForm.email}
+                            onChange={e => setEmailForm({...emailForm, email: e.target.value})}
+                            className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                            required
+                          />
                           <div className="relative">
                             <input 
                               type={showPassword ? "text" : "password"}
@@ -2498,25 +2434,13 @@ export default function App() {
                   Google Access
                 </button>
 
-                    <div className="pt-4 flex flex-col gap-6">
-                      <button 
-                        type="button"
-                        onClick={() => { setIsStaffLogin(!isStaffLogin); setLoginError(null); }}
-                        className={cn(
-                          "text-[10px] rowina-mono transition-all uppercase tracking-widest text-center py-2 px-4 rounded-xl border",
-                          isStaffLogin ? "text-rowina-blue border-rowina-blue bg-rowina-blue/5" : "text-zinc-600 border-zinc-800 hover:text-white"
-                        )}
-                      >
-                        {isStaffLogin ? "← Switch to Direct Login" : "Joining a Team? Login as Staff"}
-                      </button>
-
-                      <button 
-                        type="button"
-                        onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginError(null); setIsStaffLogin(false); }}
-                        className="text-[10px] rowina-mono text-zinc-500 hover:text-white transition-all uppercase tracking-widest text-center"
-                      >
-                        {authMode === 'login' ? "Personnel Registry →" : "← Identification Login"}
-                      </button>
+                <div className="pt-4 flex flex-col gap-6">
+                  <button 
+                    onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginError(null); }}
+                    className="text-[10px] rowina-mono text-zinc-500 hover:text-white transition-all uppercase tracking-widest text-center"
+                  >
+                    {authMode === 'login' ? "Personnel Registry →" : "← Identification Login"}
+                  </button>
                   
                   <button 
                     onClick={() => setShowAuthScreen(false)}
@@ -4247,7 +4171,7 @@ export default function App() {
               <button 
                 onClick={() => {
                   setEditingStaff(null);
-                  setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
+                  setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [], tempPassword: '' });
                   setIsStaffModalOpen(true);
                 }}
                 className="w-10 h-10 rounded-full rowina-pill-active flex items-center justify-center"
@@ -4279,6 +4203,12 @@ export default function App() {
                       <div>
                         <h4 className="font-bold text-white text-sm">{member.displayName || 'Unnamed Staff'}</h4>
                         <p className="rowina-mono text-[9px] text-zinc-500 uppercase">{member.email}</p>
+                        {member.tempPassword && (
+                          <div className="flex items-center gap-1 mt-1">
+                            <span className="rowina-mono text-[8px] text-zinc-500 uppercase tracking-tighter">PWD:</span>
+                            <span className="rowina-mono text-[8px] text-rowina-blue/70 uppercase"> {member.tempPassword}</span>
+                          </div>
+                        )}
                         <div className="flex flex-wrap gap-1 mt-1">
                           <button 
                             onClick={async () => {
@@ -4315,7 +4245,8 @@ export default function App() {
                             email: member.email, 
                             role: member.role, 
                             displayName: member.displayName || '',
-                            assignedStoreIds: member.assignedStoreIds || []
+                            assignedStoreIds: member.assignedStoreIds || [],
+                            tempPassword: member.tempPassword || ''
                           });
                           setIsStaffModalOpen(true);
                         }}
@@ -4842,6 +4773,11 @@ export default function App() {
                     <div className="space-y-2">
                       <label className="text-[10px] rowina-mono text-zinc-500 ml-2">EMAIL ADDRESS</label>
                       <input type="email" placeholder="EMAIL" value={staffForm.email} onChange={e => setStaffForm({ ...staffForm, email: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" disabled={!!editingStaff} />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2">ASSIGN LOGIN PASSWORD</label>
+                      <input type="text" placeholder="STAFF PASSWORD" value={staffForm.tempPassword} onChange={e => setStaffForm({ ...staffForm, tempPassword: e.target.value })} className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none font-mono" />
+                      <p className="text-[8px] text-zinc-600 px-2 uppercase tracking-tight">Set a simple password for the staff to use during identification.</p>
                     </div>
                     <div className="space-y-2">
                       <label className="text-[10px] rowina-mono text-zinc-500 ml-2">USER ROLE</label>

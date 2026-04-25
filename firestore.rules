@@ -113,12 +113,24 @@ service cloud.firestore {
         : request.auth.uid;
     }
 
-    function isAccountMember(docUserId) {
-      return isAuthenticated() && getAccountOwnerId() == docUserId;
+    function isAccountMember(docUserId, docStoreId) {
+      return isAuthenticated() && 
+             getAccountOwnerId() == docUserId &&
+             (isAdmin() || 
+              (isEmployee() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && (docStoreId == null || get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('assignedStoreIds', []).hasAny([docStoreId])))
+             );
+    }
+
+    function canCreateData(data) {
+      return isAccountMember(data.userId, data.get('storeId', null));
+    }
+
+    function canReadData(data) {
+      return isAccountMember(data.userId, data.get('storeId', null));
     }
 
     function isAdmin() {
-      return isAuthenticated() &&
+      return isAuthenticated() && 
         (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive' ||
          (request.auth.token.email == "richielwondo434@gmail.com" && request.auth.token.email_verified == true));
@@ -165,14 +177,15 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id', 'ownerId', 'phone']) &&
+      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id', 'ownerId', 'phone', 'tempPassword']) &&
         hasRequiredFields(['email', 'role']) &&
         data.email is string && isValidEmail(data.email) && data.email.size() <= 100 &&
         data.role in ['executive', 'employee'] &&
         (!('displayName' in data) || (data.displayName is string && data.displayName.size() <= 100)) &&
         (!('assignedStoreIds' in data) || (data.assignedStoreIds is list)) &&
         (!('ownerId' in data) || (data.ownerId is string)) &&
-        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20));
+        (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
+        (!('tempPassword' in data) || (data.tempPassword is string && data.tempPassword.size() <= 100));
     }
 
     function isValidProduct(data) {
@@ -305,119 +318,94 @@ service cloud.firestore {
     // Match Rules
     // ===============================================================
 
-    match /staff_lookups/{lookupId} {
-      allow get: if true;
-      allow create, update, delete: if isAuthenticated() && (
-        isAdmin() || 
-        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'executive'
-      );
-    }
-
     match /stores/{storeId} {
-      allow read: if isAuthenticated() && (
-        resource.data.userId == request.auth.uid || 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.userId)
-      );
+      allow read: if isAccountMember(resource.data.userId, storeId);
       allow create: if isAuthenticated() && isValidStore(request.resource.data);
-      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidStore(request.resource.data) && userIdUnchanged();
-      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow update: if isAccountMember(resource.data.userId, storeId) && isValidStore(request.resource.data) && userIdUnchanged();
+      allow delete: if isAdmin() && isAccountMember(resource.data.userId, storeId);
     }
 
     match /users/{userId} {
-      allow get: if isAuthenticated() && (
-        request.auth.uid == userId || 
-        userId == request.auth.token.email || 
-        userId == request.auth.token.email.lower() ||
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.ownerId)
-      );
-      allow list: if isAuthenticated() && (
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.ownerId) ||
-        isAdmin()
-      );
-      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin()) && isValidUser(request.resource.data);
-      allow update: if (isAuthenticated() && (request.auth.uid == userId || isAdmin())) && 
-                      isValidUser(request.resource.data) && 
-                      request.resource.data.email == resource.data.email &&
-                      request.resource.data.ownerId == resource.data.ownerId &&
-                      (isAdmin() || request.resource.data.role == resource.data.role);
-      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
+      allow get: if (isAuthenticated() && (request.auth.uid == userId || isAdmin())) || 
+                 (resource != null && resource.data.get('tempPassword', null) != null);
+      allow list: if isAuthenticated() && isAdmin();
+      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower()));
     }
 
     match /products/{productId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidProduct(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidProduct(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidProduct(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidProduct(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
 
     match /sales/{saleId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidSale(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidSale(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidSale(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidSale(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
 
     match /expenses/{expenseId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidExpense(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidExpense(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidExpense(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidExpense(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
 
     match /restocks/{restockId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidRestock(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidRestock(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidRestock(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidRestock(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
 
     match /clients/{clientId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidClient(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidClient(request.resource.data) &&
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidClient(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidClient(request.resource.data) &&
                       request.resource.data.createdAt == resource.data.createdAt && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow delete: if canReadData(resource.data);
     }
 
     match /clientTransactions/{transactionId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidClientTransaction(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidClientTransaction(request.resource.data) &&
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidClientTransaction(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidClientTransaction(request.resource.data) &&
                       request.resource.data.clientId == resource.data.clientId && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow delete: if canReadData(resource.data);
     }
 
     match /alertRules/{ruleId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidAlertRule(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidAlertRule(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidAlertRule(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidAlertRule(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
 
     match /triggeredAlerts/{alertId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidTriggeredAlert(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidTriggeredAlert(request.resource.data) &&
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidTriggeredAlert(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidTriggeredAlert(request.resource.data) &&
                       request.resource.data.ruleId == resource.data.ruleId &&
                       request.resource.data.timestamp == resource.data.timestamp && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow delete: if canReadData(resource.data);
     }
     
     match /quotations/{quotationId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidQuotation(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidQuotation(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidQuotation(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidQuotation(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
     
     match /invoices/{invoiceId} {
-      allow read: if isAccountMember(resource.data.userId);
-      allow create: if isAuthenticated() && isValidInvoice(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidInvoice(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow read: if canReadData(resource.data);
+      allow create: if canCreateData(request.resource.data) && isValidInvoice(request.resource.data);
+      allow update: if canReadData(resource.data) && isValidInvoice(request.resource.data) && userIdUnchanged();
+      allow delete: if canReadData(resource.data);
     }
 
     match /settings/global {
