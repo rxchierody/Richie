@@ -305,25 +305,45 @@ service cloud.firestore {
     // Match Rules
     // ===============================================================
 
+    match /staff_lookups/{lookupId} {
+      allow get: if true;
+      allow create, update, delete: if isAuthenticated() && (
+        isAdmin() || 
+        get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('role', '') == 'executive'
+      );
+    }
+
     match /stores/{storeId} {
-      allow read: if isAccountMember(resource.data.userId);
+      allow read: if isAuthenticated() && (
+        resource.data.userId == request.auth.uid || 
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.userId)
+      );
       allow create: if isAuthenticated() && isValidStore(request.resource.data);
-      allow update: if isAccountMember(resource.data.userId) && isValidStore(request.resource.data) && userIdUnchanged();
-      allow delete: if isAccountMember(resource.data.userId);
+      allow update: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin()) && isValidStore(request.resource.data) && userIdUnchanged();
+      allow delete: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
     }
 
     match /users/{userId} {
-      allow get: if isAuthenticated() && (request.auth.uid == userId || 
-                   (isAdmin() && resource.data.ownerId == getAccountOwnerId()) || 
-                   (userId == request.auth.token.email || userId == request.auth.token.email.lower()));
-      allow list: if isAdmin() && resource.data.ownerId == getAccountOwnerId();
+      allow get: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        userId == request.auth.token.email || 
+        userId == request.auth.token.email.lower() ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.ownerId)
+      );
+      allow list: if isAuthenticated() && (
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.get('ownerId', '') == resource.data.ownerId) ||
+        isAdmin()
+      );
       allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin()) && isValidUser(request.resource.data);
-      allow update: if (isAuthenticated() && (request.auth.uid == userId || (isAdmin() && resource.data.ownerId == getAccountOwnerId()))) && 
+      allow update: if (isAuthenticated() && (request.auth.uid == userId || isAdmin())) && 
                       isValidUser(request.resource.data) && 
                       request.resource.data.email == resource.data.email &&
                       request.resource.data.ownerId == resource.data.ownerId &&
                       (isAdmin() || request.resource.data.role == resource.data.role);
-      allow delete: if isAdmin() && resource.data.ownerId == getAccountOwnerId();
+      allow delete: if isAdmin() || (isAuthenticated() && request.auth.uid == userId);
     }
 
     match /products/{productId} {

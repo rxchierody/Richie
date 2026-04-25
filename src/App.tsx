@@ -209,12 +209,12 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
       emailVerified: auth.currentUser?.emailVerified,
       isAnonymous: auth.currentUser?.isAnonymous,
       tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
+      providerInfo: auth.currentUser?.providerData ? auth.currentUser.providerData.map(provider => ({
         providerId: provider.providerId,
         displayName: provider.displayName,
         email: provider.email,
         photoUrl: provider.photoURL
-      })) || []
+      })) : []
     },
     operationType,
     path
@@ -270,6 +270,8 @@ export default function App() {
   const [verificationCode, setVerificationCode] = useState('');
   const [confirmationResult, setConfirmationResult] = useState<any>(null);
   const [emailForm, setEmailForm] = useState({ email: '', password: '', username: '' });
+  const [managerEmail, setManagerEmail] = useState('');
+  const [isStaffLogin, setIsStaffLogin] = useState(false);
   const [showAuthScreen, setShowAuthScreen] = useState(true);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
@@ -522,29 +524,56 @@ export default function App() {
         if (currentUser) {
           // Sync user profile/role
           const userDocRef = doc(db, 'users', currentUser.uid);
-          const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
+          const emailDocRef = doc(db, 'users', (currentUser.email?.toLowerCase() || 'unknown').trim());
           
           try {
             const userDoc = await getDoc(userDocRef);
+            let profileData: UserProfile | null = null;
+            
             if (userDoc.exists()) {
-              const data = userDoc.data() as UserProfile;
-              setUserProfile({ ...data, id: userDoc.id });
-              setUserRole(data.role);
-            } else {
-              // Check if there's a pre-authorized role by email
-              // We use a try-catch here because the email-based doc might not exist 
-              // and rules might deny access if it doesn't exist
-              let emailDocData: UserProfile | null = null;
-              try {
-                const emailDoc = await getDoc(emailDocRef);
-                if (emailDoc.exists()) {
-                  emailDocData = emailDoc.data() as UserProfile;
-                }
-              } catch (e) {
-                console.warn("Email-based profile check failed (expected for new users):", e);
-              }
+              profileData = { ...userDoc.data() as UserProfile, id: userDoc.id };
+            }
 
-              let role: UserRole = 'executive'; // Default to executive for everyone to "own their own account"
+            // Always check if there's a pre-authorized role/manager by email
+            // This handles cases where an existing user is invited as staff
+            let emailDocData: UserProfile | null = null;
+            try {
+              const emailDoc = await getDoc(emailDocRef);
+              if (emailDoc.exists()) {
+                emailDocData = emailDoc.data() as UserProfile;
+                // Delete the temporary email-based doc after we read it
+                await deleteDoc(emailDocRef);
+              }
+            } catch (e) {
+              console.warn("Email-based profile check failed (expected for non-invited users):", e);
+            }
+
+            if (profileData) {
+              // If we found invitation data, merge it into the existing profile
+              if (emailDocData) {
+                const mergedProfile = {
+                  ...profileData,
+                  role: emailDocData.role === 'employee' ? 'employee' : emailDocData.role || profileData.role,
+                  ownerId: emailDocData.ownerId || profileData.ownerId,
+                  // Merge store assignments if any
+                  assignedStoreIds: Array.from(new Set([...(profileData.assignedStoreIds || []), ...(emailDocData.assignedStoreIds || [])]))
+                };
+                await updateDoc(userDocRef, mergedProfile as any);
+                profileData = mergedProfile;
+              } else if (profileData.role === 'executive' && (!profileData.ownerId || profileData.ownerId === '')) {
+                // Ensure executives own their own data
+                profileData.ownerId = currentUser.uid;
+                await updateDoc(userDocRef, { ownerId: currentUser.uid });
+              }
+              
+              setUserProfile(profileData);
+              setUserRole(profileData.role);
+              if (profileData.role === 'employee' && activeTab === 'portfolio') {
+                setActiveTab('store');
+              }
+            } else {
+              // Create a brand new profile
+              let role: UserRole = 'executive'; 
               let displayName = currentUser.displayName || '';
               let assignedStoreIds: string[] = [];
               let ownerId: string | undefined = undefined;
@@ -554,15 +583,8 @@ export default function App() {
                 displayName = emailDocData.displayName || displayName;
                 assignedStoreIds = emailDocData.assignedStoreIds || [];
                 ownerId = emailDocData.ownerId;
-                // Delete the temporary email-based doc
-                try {
-                  await deleteDoc(emailDocRef);
-                } catch (e) {
-                  console.error("Failed to delete temp email doc:", e);
-                }
               }
 
-              // Create the permanent UID-based doc
               const newProfile: UserProfile = {
                 id: currentUser.uid,
                 email: currentUser.email || '',
@@ -616,12 +638,26 @@ export default function App() {
 
   // Firestore Real-time Sync
   useEffect(() => {
-    if (!isAuthReady || !user?.uid) return;
+    if (!isAuthReady || !user?.uid || !userProfile) return;
 
-    const accountId = userProfile?.ownerId || user?.uid;
+      const accountId = (userProfile?.role === 'employee' ? userProfile?.ownerId : user?.uid) || user?.uid;
 
-    const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', accountId)), (snapshot) => {
-      const storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
+      console.log("Current Context:", { 
+        userRole, 
+        uid: user?.uid, 
+        ownerId: userProfile?.ownerId, 
+        accountId,
+        assignedStores: userProfile?.assignedStoreIds 
+      });
+
+      const unsubStores = onSnapshot(query(collection(db, 'stores'), where('userId', '==', accountId)), (snapshot) => {
+      let storesData = snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as Store));
+      
+      // Filter by assigned stores for employees if they have assignments
+      if (userRole === 'employee' && userProfile?.assignedStoreIds && userProfile.assignedStoreIds.length > 0) {
+        storesData = storesData.filter(store => userProfile.assignedStoreIds?.includes(store.id));
+      }
+      
       setStores(storesData);
       
       // If the selected store was deleted, or if no store is selected and we have stores
@@ -682,11 +718,41 @@ export default function App() {
       setTriggeredAlerts(snapshot.docs.map(doc => ({ ...doc.data(), id: doc.id } as TriggeredAlert)));
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'triggeredAlerts'));
 
+    if (!accountId || userRole === 'employee') {
+      setStaff([]);
+      return;
+    }
+
+    // Sync staff lookups for username login
+    const syncLookups = async (staffDocs: any[]) => {
+      if (userRole !== 'executive' || !userProfile?.email) return;
+      
+      for (const s of staffDocs) {
+          if (s.displayName && s.email && s.role === 'employee') {
+            const mEmail = userProfile.email.toLowerCase().trim();
+            const uName = s.displayName.toLowerCase().trim();
+            const lookupId = `${mEmail}_${uName}`;
+            try {
+              const lookupRef = doc(db, 'staff_lookups', lookupId);
+              const lookupSnap = await getDoc(lookupRef);
+              if (!lookupSnap.exists()) {
+                await setDoc(lookupRef, { email: s.email.toLowerCase().trim() });
+                console.log("Synced lookup for:", s.displayName);
+              }
+            } catch (e) {
+              console.error("Failed to sync lookup for:", s.displayName, e);
+            }
+          }
+      }
+    };
+
     const unsubStaff = onSnapshot(query(collection(db, 'users'), where('ownerId', '==', accountId)), (snapshot) => {
-      setStaff(snapshot.docs
+      const staffList = snapshot.docs
         .map(doc => ({ ...doc.data(), id: doc.id } as any))
-        .filter(s => s.id !== user.uid)
-      );
+        .filter(s => s.id !== user.uid);
+      
+      setStaff(staffList);
+      syncLookups(staffList);
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
     const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
@@ -1599,14 +1665,26 @@ export default function App() {
       if (editingStaff) {
         const docRef = doc(db, 'users', editingStaff.id);
         await updateDoc(docRef, staffForm);
+        // Update lookup
+        if (userProfile?.email) {
+          const lookupRef = doc(db, 'staff_lookups', `${userProfile.email.toLowerCase().trim()}_${staffForm.displayName.toLowerCase().trim()}`);
+          await setDoc(lookupRef, { email: staffForm.email.toLowerCase().trim() });
+        }
         setEditingStaff(null);
       } else {
         // Use email as ID for pre-authorized staff so they can be found on first login
-        const docRef = doc(db, 'users', staffForm.email.toLowerCase());
+        const emailKey = staffForm.email.toLowerCase().trim();
+        const docRef = doc(db, 'users', emailKey);
         await setDoc(docRef, {
           ...staffForm,
+          email: emailKey,
           ownerId: userProfile?.ownerId || user?.uid // Link staff to the owner of this account
         });
+        // Create lookup for username login
+        if (userProfile?.email) {
+          const lookupRef = doc(db, 'staff_lookups', `${userProfile.email.toLowerCase().trim()}_${staffForm.displayName.toLowerCase().trim()}`);
+          await setDoc(lookupRef, { email: staffForm.email.toLowerCase().trim() });
+        }
       }
       setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [] });
       setIsStaffModalOpen(false);
@@ -1948,18 +2026,47 @@ export default function App() {
     e.preventDefault();
     if (isLoggingIn) return;
     
-    const email = emailForm.email.trim().toLowerCase();
+    let email = emailForm.email.trim().toLowerCase();
     const password = emailForm.password;
+    const username = emailForm.username.trim();
     
-    if (!email || (authMode === 'login' ? !password : !password || !emailForm.username)) {
-      setLoginError("ALL FIELDS REQUIRED");
-      return;
-    }
-
     setIsLoggingIn(true);
     setLoginError(null);
 
     try {
+      // Staff Lookup Logic
+      if (isStaffLogin && authMode === 'login' && managerEmail) {
+        try {
+          const mEmail = managerEmail.trim().toLowerCase();
+          const uName = username.trim().toLowerCase();
+          const lookupId = `${mEmail}_${uName}`;
+          
+          console.log("Attempting staff lookup with ID:", lookupId);
+          const lookupDoc = await getDoc(doc(db, 'staff_lookups', lookupId));
+          if (lookupDoc.exists()) {
+            email = lookupDoc.data().email;
+            console.log("Found staff email via lookup:", email);
+          } else {
+            // Check if maybe they entered name differently, but stick to the ID for now
+            console.warn("Staff lookup failed for ID:", lookupId);
+            setLoginError("STAFF MEMBER NOT FOUND. ENSURE MANAGER EMAIL AND YOUR NAME MATCH THE STAFF REGISTRY.");
+            setIsLoggingIn(false);
+            return;
+          }
+        } catch (lookupErr: any) {
+          console.error("Staff lookup permission/network error:", lookupErr);
+          setLoginError("SECURITY RESTRICTION: UNABLE TO VALIDATE STAFF CREDENTIALS.");
+          setIsLoggingIn(false);
+          return;
+        }
+      }
+
+      if (!email || (authMode === 'login' ? !password : !password || !username)) {
+        setLoginError("ALL FIELDS REQUIRED");
+        setIsLoggingIn(false);
+        return;
+      }
+
       if (authMode === 'login') {
         const userCredential = await signInWithEmailAndPassword(auth, email, password);
         
@@ -1978,12 +2085,16 @@ export default function App() {
       setShowAuthScreen(false);
     } catch (error: any) {
       console.error("Email auth failed:", error);
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-        setLoginError("INVALID EMAIL OR PASSWORD");
+      if (error.code === 'auth/network-request-failed' || !navigator.onLine) {
+        setLoginError("NETWORK ERROR: PLEASE CHECK YOUR CONNECTION OR DISABLE AD-BLOCKERS");
+      } else if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
+        setLoginError("INVALID ACCOUNT DETAILS");
       } else if (error.code === 'auth/email-already-in-use') {
-        setLoginError("EMAIL ALREADY REGISTERED");
+        setLoginError("ACCOUNT EXISTS. ALREADY REGISTERED? TRY LOGGING IN INSTEAD.");
+      } else if (error.code === 'auth/too-many-requests') {
+        setLoginError("TOO MANY ATTEMPTS. TRY AGAIN LATER.");
       } else {
-        setLoginError(error.message?.toUpperCase() || "AUTHENTICATION FAILED");
+        setLoginError(error.message?.toUpperCase().replace('FIREBASE: ', '') || "AUTHENTICATION FAILED");
       }
     } finally {
       if (!requiresOtp) setIsLoggingIn(false);
@@ -2014,7 +2125,12 @@ export default function App() {
         setLoginError(data.error || "INVALID OTP CODE");
       }
     } catch (err) {
-      setLoginError("VERIFICATION FAILED. TRY AGAIN.");
+      console.error("OTP Verification Error:", err);
+      if (!navigator.onLine) {
+        setLoginError("NETWORK DISCONNECTED. CHECK CONNECTION.");
+      } else {
+        setLoginError("VERIFICATION FAILED. CHECK CODE OR CONNECTION.");
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -2030,7 +2146,18 @@ export default function App() {
       await sendPasswordResetEmail(auth, emailForm.email);
       setResetSent(true);
     } catch (err: any) {
-      setLoginError(err.message.toUpperCase());
+      console.error("Auth error:", err);
+      if (err.code === 'auth/network-request-failed' || !navigator.onLine) {
+        setLoginError("NETWORK ERROR. CHECK CONNECTION.");
+      } else if (err.code === 'auth/invalid-login-credentials' || err.code === 'auth/invalid-credential' || err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password') {
+        setLoginError("INVALID EMAIL OR PASSWORD.");
+      } else if (err.code === 'auth/email-already-in-use') {
+        setLoginError("EMAIL ALREADY REGISTERED.");
+      } else if (err.code === 'auth/weak-password') {
+        setLoginError("PASSWORD TOO WEAK.");
+      } else {
+        setLoginError(err.message.toUpperCase().replace('FIREBASE: ', ''));
+      }
     } finally {
       setIsLoggingIn(false);
     }
@@ -2190,165 +2317,145 @@ export default function App() {
             <p className="rowina-mono text-zinc-500 text-xs tracking-[0.4em] uppercase font-bold">Secure Core v2.0</p>
           </div>
           
-          <div className="bg-rowina-gray p-8 rounded-[40px] border border-zinc-800 space-y-8 relative overflow-hidden shadow-2xl">
-            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-rowina-blue to-transparent opacity-30" />
-            
-            <div className="w-20 h-20 bg-zinc-800/50 rounded-3xl flex items-center justify-center mx-auto text-rowina-blue border border-zinc-700 shadow-inner">
-              {requiresOtp ? <Fingerprint size={40} /> : isForgotPassword ? <Key size={40} /> : <Shield size={40} />}
-            </div>
-
-            <div className="space-y-6">
+          <div className="bg-rowina-gray p-8 sm:p-10 rounded-[48px] border border-zinc-800 shadow-2xl">
+            <div className="space-y-10">
               {requiresOtp ? (
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">Security Code</h2>
-                    <p className="text-zinc-500 text-sm leading-relaxed">Enter the 6-digit code from your authenticator app.</p>
+                <div className="space-y-8">
+                  <div className="space-y-2 text-center">
+                    <h2 className="text-2xl font-bold text-white uppercase tracking-tight">Login Code</h2>
+                    <p className="text-zinc-500 text-sm">Enter the code from your Authenticator app.</p>
                   </div>
-                  
-                  <input 
-                    type="text" 
-                    maxLength={6}
-                    placeholder="000000" 
-                    value={otpToken}
-                    onChange={e => setOtpToken(e.target.value.replace(/\D/g, ''))}
-                    className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-3xl text-center tracking-[0.4em] font-bold text-rowina-blue focus:border-rowina-blue outline-none transition-all placeholder:text-zinc-900 shadow-inner"
-                  />
-
-                  {loginError && (
-                    <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl">
-                      <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
-                    </div>
-                  )}
-
-                  <button 
-                    onClick={handleVerifyOtp}
-                    disabled={isLoggingIn || otpToken.length !== 6}
-                    className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20 disabled:opacity-30 disabled:grayscale"
-                  >
-                    {isLoggingIn ? 'Verifying...' : 'Confirm Code'}
-                  </button>
-
-                  <button 
-                    onClick={() => { setRequiresOtp(false); setPendingUser(null); setLoginError(null); }}
-                    className="text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-[0.2em] transition-all"
-                  >
-                    ← Cancel
-                  </button>
-                </div>
-              ) : isForgotPassword ? (
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">Reset Password</h2>
-                    <p className="text-zinc-500 text-sm leading-relaxed">We will send a reset link to your email address.</p>
-                  </div>
-
-                  {resetSent ? (
-                    <div className="bg-emerald-500/10 border border-emerald-500/20 p-8 rounded-3xl space-y-4">
-                       <CheckCircle size={40} className="mx-auto text-emerald-500" />
-                       <p className="text-emerald-500 text-xs font-bold rowina-mono uppercase leading-relaxed tracking-wider">
-                         Email sent! Please check your inbox.
-                       </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-4 text-left">
-                      <div className="space-y-2">
-                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Address</label>
-                        <input 
-                          type="email" 
-                          placeholder="your@email.com" 
-                          value={emailForm.email}
-                          onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
-                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
-                        />
+                  <div className="space-y-6">
+                    <input 
+                      type="number"
+                      placeholder="000000"
+                      value={otpToken}
+                      onChange={e => setOtpToken(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleVerifyOtp()}
+                      className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-center text-3xl tracking-[0.3em] focus:border-rowina-blue outline-none transition-all placeholder:text-zinc-800"
+                      autoFocus
+                    />
+                    {loginError && (
+                      <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center">
+                        <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
                       </div>
-
-                      {loginError && (
-                        <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center">
-                          <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
-                        </div>
-                      )}
-
-                      <button 
-                        onClick={handleForgotPassword}
-                        disabled={isLoggingIn}
-                        className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg"
-                      >
-                        {isLoggingIn ? 'Sending...' : 'Send Reset Link'}
-                      </button>
-                    </div>
-                  )}
-
-                  <button 
-                    onClick={() => { setIsForgotPassword(false); setResetSent(false); setLoginError(null); }}
-                    className="text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-[0.2em] transition-all"
-                  >
-                    ← Back to Login
-                  </button>
+                    )}
+                    <button 
+                      onClick={handleVerifyOtp}
+                      disabled={isLoggingIn}
+                      className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20"
+                    >
+                      {isLoggingIn ? 'Verifying...' : 'Access Now'}
+                    </button>
+                    <button 
+                      onClick={() => { setRequiresOtp(false); setPendingUser(null); setLoginError(null); }}
+                      className="w-full text-[10px] rowina-mono text-zinc-600 uppercase tracking-widest hover:text-white transition-all text-center"
+                    >
+                      Cancel Verification
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <>
-                  <div className="space-y-2">
-                    <h2 className="text-2xl font-bold text-white">{authMode === 'login' ? 'Welcome Back' : 'Create Account'}</h2>
-                    <p className="text-zinc-500 text-sm leading-relaxed">{authMode === 'login' ? 'Sign in to access your sales data.' : 'Sign up to start tracking your business.'}</p>
+                  <div className="space-y-2 text-center text-balance">
+                    <h2 className="text-2xl font-bold text-white uppercase tracking-tight">
+                      {isForgotPassword ? 'Reset Access' : (authMode === 'login' ? 'Secure Login' : 'Create Account')}
+                    </h2>
+                    <p className="text-zinc-500 text-sm">
+                      {isForgotPassword 
+                        ? "We'll send you a recovery link." 
+                        : (authMode === 'login' ? 'Welcome back. Provide credentials below.' : 'Staff? Use your registered email. Others create a new ID.')}
+                    </p>
                   </div>
-
-                  <form onSubmit={handleEmailAuth} className="space-y-4 text-left">
-                    {authMode === 'signup' && (
-                      <div className="space-y-2">
-                        <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Your Name</label>
+                  
+                  <form 
+                    onSubmit={isForgotPassword ? (e) => { e.preventDefault(); handleForgotPassword(); } : handleEmailAuth} 
+                    className="space-y-6"
+                  >
+                    <div className="space-y-4">
+                      {isForgotPassword ? (
                         <input 
-                          type="text" 
-                          placeholder="Enter your name" 
-                          value={emailForm.username}
-                          onChange={e => setEmailForm({ ...emailForm, username: e.target.value })}
-                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                          type="email"
+                          placeholder="EMAIL ADDRESS"
+                          value={emailForm.email}
+                          onChange={e => setEmailForm({...emailForm, email: e.target.value})}
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                          required
                         />
-                      </div>
-                    )}
-                    <div className="space-y-2">
-                      <label className="text-[10px] rowina-mono text-zinc-600 ml-2 uppercase font-bold tracking-widest">Email Address</label>
-                      <input 
-                        type="email" 
-                        placeholder="your@email.com" 
-                        value={emailForm.email}
-                        onChange={e => setEmailForm({ ...emailForm, email: e.target.value })}
-                        className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <div className="flex justify-between items-center px-2">
-                        <label className="text-[10px] rowina-mono text-zinc-600 uppercase font-bold tracking-widest">Password</label>
-                        {authMode === 'login' && (
+                      ) : (
+                        <>
+                          {(authMode === 'signup' || (authMode === 'login' && isStaffLogin)) && (
+                            <input 
+                              type="text"
+                              placeholder={isStaffLogin ? "YOUR STAFF NAME" : "FULL NAME"}
+                              value={emailForm.username}
+                              onChange={e => setEmailForm({...emailForm, username: e.target.value})}
+                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                              required
+                            />
+                          )}
+                          {isStaffLogin && authMode === 'login' && (
+                            <input 
+                              type="email"
+                              placeholder="MANAGER'S EMAIL"
+                              value={managerEmail}
+                              onChange={e => setManagerEmail(e.target.value)}
+                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                              required
+                            />
+                          )}
+                          {!isStaffLogin && (
+                            <input 
+                              type="email"
+                              placeholder="EMAIL ADDRESS"
+                              value={emailForm.email}
+                              onChange={e => setEmailForm({...emailForm, email: e.target.value})}
+                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                              required={!isStaffLogin}
+                            />
+                          )}
+                          <div className="relative">
+                            <input 
+                              type={showPassword ? "text" : "password"}
+                              placeholder="AUTHENTICATION PASS"
+                              value={emailForm.password}
+                              onChange={e => setEmailForm({...emailForm, password: e.target.value})}
+                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all pr-12 shadow-inner"
+                              required
+                            />
+                            <button 
+                              type="button"
+                              onClick={() => setShowPassword(!showPassword)}
+                              className="absolute right-6 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
+                            >
+                              {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                            </button>
+                          </div>
+                        </>
+                      )}
+                      
+                      {!isForgotPassword && authMode === 'login' && (
+                        <div className="flex justify-end">
                           <button 
                             type="button"
                             onClick={() => setIsForgotPassword(true)}
-                            className="text-[10px] rowina-mono text-rowina-blue/60 hover:text-rowina-blue uppercase transition-colors"
+                            className="text-[10px] rowina-mono text-zinc-600 hover:text-rowina-blue transition-all uppercase tracking-widest font-bold"
                           >
-                            Forgot?
+                            Lost Credentials?
                           </button>
-                        )}
-                      </div>
-                      <div className="relative">
-                        <input 
-                          type={showPassword ? "text" : "password"} 
-                          placeholder="••••••••" 
-                          value={emailForm.password}
-                          onChange={e => setEmailForm({ ...emailForm, password: e.target.value })}
-                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all pr-12 shadow-inner"
-                        />
-                        <button 
-                          type="button"
-                          onClick={() => setShowPassword(!showPassword)}
-                          className="absolute right-4 top-1/2 -translate-y-1/2 text-zinc-600 hover:text-zinc-400 transition-colors"
-                        >
-                          {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
-                        </button>
-                      </div>
+                        </div>
+                      )}
                     </div>
 
                     {loginError && (
                       <div className="bg-rose-500/10 border border-rose-500/20 p-4 rounded-xl text-center">
-                        <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">{loginError}</p>
+                        <p className="text-rose-500 text-[10px] rowina-mono font-bold uppercase tracking-widest leading-relaxed">{loginError}</p>
+                      </div>
+                    )}
+
+                    {resetSent && (
+                      <div className="bg-emerald-500/10 border border-emerald-500/20 p-4 rounded-xl text-center">
+                        <p className="text-emerald-500 text-[10px] rowina-mono font-bold uppercase tracking-widest">Link Sent! Check Inbox.</p>
                       </div>
                     )}
 
@@ -2357,42 +2464,65 @@ export default function App() {
                       disabled={isLoggingIn}
                       className="w-full py-5 rounded-2xl font-bold rowina-mono text-sm tracking-widest uppercase transition-all rowina-pill-active shadow-lg shadow-rowina-blue/20"
                     >
-                      {isLoggingIn ? 'Loading...' : authMode === 'login' ? 'Sign In' : 'Sign Up'}
+                      {isLoggingIn 
+                        ? (isForgotPassword ? 'Sending...' : 'Initializing...') 
+                        : (isForgotPassword ? 'Send Recovery Link' : (authMode === 'login' ? 'Access Now' : 'Sign Up'))}
                     </button>
                   </form>
+                  
+                  {isForgotPassword && (
+                    <button 
+                      onClick={() => { setIsForgotPassword(false); setResetSent(false); }}
+                      className="w-full text-[10px] rowina-mono text-zinc-600 hover:text-white uppercase tracking-widest text-center"
+                    >
+                      ← Back to Login
+                    </button>
+                  )}
                 </>
               )}
             </div>
 
             {!requiresOtp && !isForgotPassword && (
-              <div className="pt-8 border-t border-zinc-800 mt-8 space-y-6">
-                <div className="flex items-center gap-4 text-zinc-700">
+              <div className="pt-10 border-t border-zinc-800/50 mt-10 space-y-6">
+                <div className="flex items-center gap-4 text-zinc-800">
                   <div className="flex-1 h-[1px] bg-zinc-800" />
-                  <span className="text-[10px] rowina-mono uppercase tracking-[0.3em]">OR</span>
+                  <span className="text-[10px] rowina-mono uppercase tracking-[0.4em]">External</span>
                   <div className="flex-1 h-[1px] bg-zinc-800" />
                 </div>
                 
                 <button 
                   onClick={() => signInWithPopup(auth, new GoogleAuthProvider())}
-                  className="w-full bg-zinc-900 border border-zinc-800 py-4 rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all text-xs font-bold rowina-mono uppercase tracking-widest text-zinc-300 shadow-inner"
+                  className="w-full bg-zinc-900 border border-zinc-800 py-5 rounded-2xl flex items-center justify-center gap-3 hover:bg-zinc-800 transition-all text-[11px] font-bold rowina-mono uppercase tracking-[0.2em] text-zinc-300 shadow-inner"
                 >
-                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" className="w-5 h-5 grayscale opacity-70" />
-                  Continue with Google
+                  <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="G" className="w-5 h-5 grayscale opacity-50" />
+                  Google Access
                 </button>
 
-                <div className="pt-4 flex flex-col gap-4">
-                  <button 
-                    onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginError(null); }}
-                    className="text-[10px] rowina-mono text-zinc-500 hover:text-white transition-all uppercase tracking-widest flex items-center justify-center gap-2"
-                  >
-                    {authMode === 'login' ? "Don't have an ID? Establish Protocol" : "Existing Operator? Authorize"}
-                  </button>
+                    <div className="pt-4 flex flex-col gap-6">
+                      <button 
+                        type="button"
+                        onClick={() => { setIsStaffLogin(!isStaffLogin); setLoginError(null); }}
+                        className={cn(
+                          "text-[10px] rowina-mono transition-all uppercase tracking-widest text-center py-2 px-4 rounded-xl border",
+                          isStaffLogin ? "text-rowina-blue border-rowina-blue bg-rowina-blue/5" : "text-zinc-600 border-zinc-800 hover:text-white"
+                        )}
+                      >
+                        {isStaffLogin ? "← Switch to Direct Login" : "Joining a Team? Login as Staff"}
+                      </button>
+
+                      <button 
+                        type="button"
+                        onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginError(null); setIsStaffLogin(false); }}
+                        className="text-[10px] rowina-mono text-zinc-500 hover:text-white transition-all uppercase tracking-widest text-center"
+                      >
+                        {authMode === 'login' ? "Personnel Registry →" : "← Identification Login"}
+                      </button>
                   
                   <button 
                     onClick={() => setShowAuthScreen(false)}
-                    className="text-[10px] rowina-mono text-zinc-700 hover:text-zinc-400 transition-all uppercase tracking-widest"
+                    className="text-[10px] rowina-mono text-zinc-700 hover:text-zinc-500 transition-all uppercase tracking-widest text-center"
                   >
-                    Continue as Auxiliary (Guest)
+                    Guest Bypass
                   </button>
                 </div>
               </div>
@@ -3903,9 +4033,9 @@ export default function App() {
                     </div>
 
                     <div className="space-y-2">
-                      <p className="text-zinc-600 text-[8px] rowina-mono uppercase tracking-widest">Manual Entry Sequence:</p>
+                      <p className="text-zinc-600 text-[8px] rowina-mono uppercase tracking-widest">Manual Setup Key:</p>
                       <code className="text-rowina-blue text-xs font-mono break-all bg-black/40 p-2 rounded-lg block border border-zinc-800">
-                        {otpSecretRaw?.includes(':') ? otpSecretRaw.split(':')[1]?.substring(0, 32) : 'GENERATING...'}...
+                        {typeof otpSecretRaw === 'string' && otpSecretRaw.includes(':') ? otpSecretRaw.split(':')[1]?.substring(0, 32) : 'GENERATING...'}...
                       </code>
                     </div>
 
