@@ -46,7 +46,9 @@ import {
   CheckCircle2,
   Sparkles,
   RefreshCw,
-  BellOff
+  BellOff,
+  Volume2,
+  VolumeX
 } from 'lucide-react';
 import { GoogleGenAI } from "@google/genai";
 import jsPDF from 'jspdf';
@@ -225,10 +227,53 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     },
     operationType,
     path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
+  };
+  console.warn('Firestore Operation Warning/Error: ', JSON.stringify(errInfo));
+  return errInfo.error;
 }
+
+// Subtle, non-intrusive Web Audio API sound alert chime for low-stock warnings
+const playLowStockAlertSound = () => {
+  try {
+    const AudioCtxClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (!AudioCtxClass) return;
+    const ctx = new AudioCtxClass();
+    if (ctx.state === 'suspended') {
+      ctx.resume().catch(() => {});
+    }
+    
+    const now = ctx.currentTime;
+    
+    // Subtle dual-tone harmonic chime (D5 -> A5)
+    const osc1 = ctx.createOscillator();
+    const gain1 = ctx.createGain();
+    osc1.type = 'sine';
+    osc1.frequency.setValueAtTime(587.33, now); // D5
+    osc1.frequency.exponentialRampToValueAtTime(880, now + 0.12); // A5
+    gain1.gain.setValueAtTime(0.08, now);
+    gain1.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+    osc1.connect(gain1);
+    gain1.connect(ctx.destination);
+    
+    const osc2 = ctx.createOscillator();
+    const gain2 = ctx.createGain();
+    osc2.type = 'sine';
+    osc2.frequency.setValueAtTime(880, now + 0.1); // A5
+    osc2.frequency.exponentialRampToValueAtTime(1174.66, now + 0.22); // D6
+    gain2.gain.setValueAtTime(0.001, now);
+    gain2.gain.setValueAtTime(0.06, now + 0.1);
+    gain2.gain.exponentialRampToValueAtTime(0.001, now + 0.45);
+    osc2.connect(gain2);
+    gain2.connect(ctx.destination);
+
+    osc1.start(now);
+    osc1.stop(now + 0.35);
+    osc2.start(now + 0.1);
+    osc2.stop(now + 0.45);
+  } catch (err) {
+    console.warn("Low stock audio alert could not play automatically:", err);
+  }
+};
 
 const withTimeout = <T,>(promise: Promise<T>, ms = 8000, errorMsg = "Operation timed out. Please check your internet connection and try again."): Promise<T> => {
   return Promise.race([
@@ -995,6 +1040,11 @@ export default function App() {
     });
 
     if (newTriggered.length > 0) {
+      // Play subtle audible sound alert if enabled (default enabled)
+      if (userProfile?.lowStockSoundEnabled !== false && newTriggered.some(a => a.ruleId === 'manual-stock')) {
+        playLowStockAlertSound();
+      }
+
       const batch = writeBatch(db);
       newTriggered.forEach(alert => {
         const alertRef = doc(collection(db, 'triggeredAlerts'));
@@ -3117,45 +3167,81 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
               </p>
             </div>
           </div>
-          <button 
-            onClick={async () => {
-              const next = !userProfile.externalNotificationsEnabled;
-              if (next && "Notification" in window) {
-                const permission = await Notification.requestPermission();
-                if (permission !== "granted") {
-                  setGlobalError("Notification permission denied by device. Please reset browser site permissions.");
-                  return;
-                } else {
-                  try {
-                    new Notification("Rowina Sales", {
-                      body: "WhatsApp-style device alerts successfully synchronized!",
-                      icon: "/favicon.ico"
-                    });
-                  } catch (e) {
-                    console.error("Notification constructor error:", e);
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="button"
+              onClick={playLowStockAlertSound}
+              className="flex items-center gap-1.5 px-3.5 py-3 rounded-full bg-zinc-800/80 hover:bg-zinc-700 text-zinc-300 font-bold rowina-mono text-[9px] tracking-widest transition-all border border-zinc-700/50"
+              title="Preview subtle low stock chime sound"
+            >
+              <Volume2 size={13} className="text-rowina-blue" />
+              <span className="hidden sm:inline">TEST CHIME</span>
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
+                if (!userProfile) return;
+                const next = userProfile.lowStockSoundEnabled === false;
+                try {
+                  await updateDoc(doc(db, 'users', userProfile.id), { lowStockSoundEnabled: next });
+                  setUserProfile({ ...userProfile, lowStockSoundEnabled: next });
+                  if (next) playLowStockAlertSound();
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.UPDATE, `users/${userProfile.id}`);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-1.5 px-3.5 py-3 rounded-full font-bold rowina-mono text-[9px] tracking-widest transition-all border",
+                userProfile?.lowStockSoundEnabled !== false
+                  ? "bg-rowina-blue/20 text-rowina-blue border-rowina-blue/40 shadow-[0_0_12px_rgba(10,132,255,0.2)]"
+                  : "bg-zinc-800 text-zinc-500 border-zinc-700/50"
+              )}
+              title="Toggle low stock sound alert"
+            >
+              {userProfile?.lowStockSoundEnabled !== false ? <Volume2 size={13} /> : <VolumeX size={13} />}
+              <span>{userProfile?.lowStockSoundEnabled !== false ? "SOUND ON" : "MUTED"}</span>
+            </button>
+
+            <button 
+              onClick={async () => {
+                const next = !userProfile.externalNotificationsEnabled;
+                if (next && "Notification" in window) {
+                  const permission = await Notification.requestPermission();
+                  if (permission !== "granted") {
+                    setGlobalError("Notification permission denied by device. Please reset browser site permissions.");
+                    return;
+                  } else {
+                    try {
+                      new Notification("Rowina Sales", {
+                        body: "WhatsApp-style device alerts successfully synchronized!",
+                        icon: "/favicon.ico"
+                      });
+                    } catch (e) {
+                      console.error("Notification constructor error:", e);
+                    }
                   }
                 }
-              }
-              try {
-                await updateDoc(doc(db, 'users', userProfile.id), { externalNotificationsEnabled: next });
-                setUserProfile({ ...userProfile, externalNotificationsEnabled: next });
-              } catch (err) {
-                handleFirestoreError(err, OperationType.UPDATE, `users/${userProfile.id}`);
-              }
-            }}
-            className={cn(
-              "flex items-center gap-2 px-5 py-3 rounded-full font-bold rowina-mono text-[9px] tracking-widest transition-all hover:scale-[1.02] active:scale-[0.98]",
-              userProfile?.externalNotificationsEnabled 
-                ? "bg-rowina-blue text-black shadow-lg shadow-rowina-blue/20" 
-                : "bg-zinc-800 text-zinc-400 hover:text-white"
-            )}
-          >
-            {userProfile?.externalNotificationsEnabled ? "ONLINE / SYNCED" : "OFFLINE / CONNECT"}
-            <div className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              userProfile?.externalNotificationsEnabled ? "bg-black animate-ping" : "bg-zinc-600"
-            )} />
-          </button>
+                try {
+                  await updateDoc(doc(db, 'users', userProfile.id), { externalNotificationsEnabled: next });
+                  setUserProfile({ ...userProfile, externalNotificationsEnabled: next });
+                } catch (err) {
+                  handleFirestoreError(err, OperationType.UPDATE, `users/${userProfile.id}`);
+                }
+              }}
+              className={cn(
+                "flex items-center gap-2 px-5 py-3 rounded-full font-bold rowina-mono text-[9px] tracking-widest transition-all hover:scale-[1.02] active:scale-[0.98]",
+                userProfile?.externalNotificationsEnabled 
+                  ? "bg-rowina-blue text-black shadow-lg shadow-rowina-blue/20" 
+                  : "bg-zinc-800 text-zinc-400 hover:text-white"
+              )}
+            >
+              {userProfile?.externalNotificationsEnabled ? "ONLINE / SYNCED" : "OFFLINE / CONNECT"}
+              <div className={cn(
+                "w-1.5 h-1.5 rounded-full",
+                userProfile?.externalNotificationsEnabled ? "bg-black animate-ping" : "bg-zinc-600"
+              )} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -6037,7 +6123,28 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                           className="w-full py-4 text-sm focus:border-rowina-blue outline-none bg-transparent" 
                         />
                       </div>
-                      <p className="text-[8px] rowina-mono text-zinc-500 ml-2 font-bold">SYSTEM WILL GENERATE AN INSIGHT WHEN PRODUCT FALLS BELOW THIS LEVEL</p>
+                      <div className="flex items-center justify-between bg-rowina-black/60 border border-zinc-800 rounded-xl p-3 mt-1">
+                        <div className="flex items-center gap-2">
+                          {userProfile?.lowStockSoundEnabled !== false ? (
+                            <Volume2 size={14} className="text-rowina-blue animate-pulse" />
+                          ) : (
+                            <VolumeX size={14} className="text-zinc-500" />
+                          )}
+                          <span className="text-[10px] rowina-mono text-zinc-400">
+                            Audible Chime: <strong className={userProfile?.lowStockSoundEnabled !== false ? "text-rowina-blue font-bold" : "text-zinc-500 font-bold"}>
+                              {userProfile?.lowStockSoundEnabled !== false ? 'ACTIVE' : 'MUTED'}
+                            </strong>
+                          </span>
+                        </div>
+                        <button 
+                          type="button"
+                          onClick={playLowStockAlertSound}
+                          className="text-[9px] rowina-mono bg-zinc-800 hover:bg-zinc-700 text-zinc-300 px-2.5 py-1 rounded-lg transition-all flex items-center gap-1 border border-zinc-700/50"
+                        >
+                          <Volume2 size={10} className="text-rowina-blue" /> Test Chime
+                        </button>
+                      </div>
+                      <p className="text-[8px] rowina-mono text-zinc-500 ml-2 font-bold">SYSTEM WILL TRIGGER AUDIBLE ALERTS AND INSIGHTS WHEN PRODUCT FALLS BELOW THIS LEVEL</p>
                     </div>
                     <button 
                       onClick={handleAddProduct} 

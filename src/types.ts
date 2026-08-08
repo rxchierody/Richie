@@ -120,6 +120,7 @@ export interface UserProfile {
   ownerId?: string;
   notificationsEnabled?: boolean;
   externalNotificationsEnabled?: boolean;
+  lowStockSoundEnabled?: boolean;
   otpSecret?: string;
   otpEnabled?: boolean;
   tempPassword?: string;

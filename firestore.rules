@@ -428,6 +428,10 @@ service cloud.firestore {
       allow delete: if canReadData(resource.data);
     }
 
+    match /test/{docId} {
+      allow read: if true;
+    }
+
     match /settings/global {
       allow read: if isAuthenticated();
       allow create, update: if isAdmin() && isValidSettings(request.resource.data);
