@@ -189,13 +189,14 @@ service cloud.firestore {
     }
 
     function isValidProduct(data) {
-      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'category', 'unit', 'stockQuantity', 'buyingPrice', 'sellingPrice']) &&
+      return hasOnlyAllowedFields(['userId', 'storeId', 'name', 'category', 'unit', 'stockQuantity', 'buyingPrice', 'sellingPrice', 'lowStockThreshold']) &&
         hasRequiredFields(['userId', 'storeId', 'name', 'stockQuantity', 'buyingPrice', 'sellingPrice']) &&
         data.userId == getAccountOwnerId() &&
         data.storeId is string &&
         data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
         (!('category' in data) || (data.category is string && data.category.size() <= 50)) &&
         (!('unit' in data) || (data.unit is string && data.unit.size() <= 20)) &&
+        (!('lowStockThreshold' in data) || (data.lowStockThreshold is number)) &&
         data.stockQuantity is number &&
         data.buyingPrice is number &&
         data.sellingPrice is number;

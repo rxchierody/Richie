@@ -24,7 +24,8 @@
         "unit": { "type": "string" },
         "stockQuantity": { "type": "number" },
         "buyingPrice": { "type": "number" },
-        "sellingPrice": { "type": "number" }
+        "sellingPrice": { "type": "number" },
+        "lowStockThreshold": { "type": "number" }
       },
       "required": ["userId", "storeId", "name", "stockQuantity", "buyingPrice", "sellingPrice"]
     },

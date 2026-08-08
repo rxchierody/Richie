@@ -20,6 +20,7 @@ export interface Product {
   stockQuantity: number;
   buyingPrice: number;
   sellingPrice: number;
+  lowStockThreshold?: number;
 }
 
 export interface Sale {
@@ -118,9 +119,12 @@ export interface UserProfile {
   assignedStoreIds?: string[];
   ownerId?: string;
   notificationsEnabled?: boolean;
+  externalNotificationsEnabled?: boolean;
   otpSecret?: string;
   otpEnabled?: boolean;
   tempPassword?: string;
+  plan?: 'Basic' | 'Pro' | 'Free';
+  hasSubscribed?: boolean;
 }
 
 export interface DocumentItem {

@@ -42,8 +42,13 @@ import {
   Fingerprint,
   Printer,
   Eye,
-  EyeOff
+  EyeOff,
+  CheckCircle2,
+  Sparkles,
+  RefreshCw,
+  BellOff
 } from 'lucide-react';
+import { GoogleGenAI } from "@google/genai";
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
 import { motion, AnimatePresence } from 'motion/react';
@@ -58,7 +63,9 @@ import {
   Legend,
   Cell,
   PieChart,
-  Pie
+  Pie,
+  AreaChart,
+  Area
 } from 'recharts';
 import { 
   format, 
@@ -112,7 +119,7 @@ import {
   Timestamp
 } from 'firebase/firestore';
 
-type Tab = 'portfolio' | 'store' | 'clients' | 'calendar' | 'documents' | 'reports' | 'alerts' | 'staff' | 'stores' | 'security' | 'help';
+type Tab = 'portfolio' | 'store' | 'clients' | 'calendar' | 'documents' | 'reports' | 'alerts' | 'staff' | 'stores' | 'security' | 'help' | 'subscription';
 type TimePeriod = 'daily' | 'weekly' | 'monthly' | 'yearly';
 
 enum OperationType {
@@ -223,6 +230,51 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   throw new Error(JSON.stringify(errInfo));
 }
 
+const withTimeout = <T,>(promise: Promise<T>, ms = 8000, errorMsg = "Operation timed out. Please check your internet connection and try again."): Promise<T> => {
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => setTimeout(() => reject(new Error(errorMsg)), ms))
+  ]);
+};
+
+const EmptyState = ({
+  icon: Icon,
+  title,
+  description,
+  actionLabel,
+  onAction
+}: {
+  icon: any;
+  title: string;
+  description: string;
+  actionLabel?: string;
+  onAction?: () => void;
+}) => {
+  return (
+    <motion.div 
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      className="bg-rowina-gray/40 border border-dashed border-zinc-800 p-12 rounded-[2.5rem] text-center flex flex-col items-center justify-center space-y-4 max-w-lg mx-auto w-full"
+    >
+      <div className="w-16 h-16 rounded-full bg-zinc-800/50 border border-zinc-700/30 flex items-center justify-center text-zinc-500">
+        <Icon size={28} />
+      </div>
+      <div className="space-y-1">
+        <h3 className="text-lg font-bold text-white tracking-tight">{title}</h3>
+        <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest leading-relaxed max-w-xs mx-auto">{description}</p>
+      </div>
+      {actionLabel && onAction && (
+        <button 
+          onClick={onAction}
+          className="mt-2 text-[10px] rowina-mono text-rowina-blue border border-rowina-blue/30 hover:bg-rowina-blue/10 px-5 py-2.5 rounded-full transition-all font-bold tracking-widest cursor-pointer"
+        >
+          {actionLabel}
+        </button>
+      )}
+    </motion.div>
+  );
+};
+
 const StatCard = ({ 
   label, 
   value, 
@@ -259,6 +311,8 @@ const StatCard = ({
   );
 };
 
+const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY! });
+
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
@@ -288,6 +342,8 @@ export default function App() {
   const [otpVerifyError, setOtpVerifyError] = useState('');
   
   const [activeTab, setActiveTab] = useState<Tab>('portfolio');
+  const [selectedPlan, setSelectedPlan] = useState<string | null>(null);
+  const [billingCycle, setBillingCycle] = useState<'1' | '3' | '6' | '12'>('1');
   const [documentSubTab, setDocumentSubTab] = useState<'RECEIPTS' | 'INVOICES' | 'QUOTATIONS'>('RECEIPTS');
   const [timePeriod, setTimePeriod] = useState<TimePeriod>('daily');
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
@@ -311,6 +367,10 @@ export default function App() {
   });
   const [lockInput, setLockInput] = useState('');
   const [lockError, setLockError] = useState<string | null>(null);
+
+  // AI Insights State
+  const [aiInsights, setAiInsights] = useState<{ id: string; text: string; type: 'stock' | 'sales' | 'general'; timestamp: string }[]>([]);
+  const [isGeneratingAi, setIsGeneratingAi] = useState(false);
   const [newExecPassword, setNewExecPassword] = useState('');
   const [isUpdatingExecPassword, setIsUpdatingExecPassword] = useState(false);
 
@@ -388,7 +448,15 @@ export default function App() {
   const [selectedClient, setSelectedClient] = useState<Client | null>(null);
   const [selectedProductId, setSelectedProductId] = useState<string>('');
   
-  const [productForm, setProductForm] = useState<Partial<Product>>({ name: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined });
+  const [productForm, setProductForm] = useState<Partial<Product>>({ 
+    name: '', 
+    category: 'General', 
+    unit: 'pcs', 
+    stockQuantity: undefined, 
+    buyingPrice: undefined, 
+    sellingPrice: undefined,
+    lowStockThreshold: 5
+  });
   const [saleForm, setSaleForm] = useState<Partial<Sale>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
   const [expenseForm, setExpenseForm] = useState<Partial<Expense>>({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
   const [restockForm, setRestockForm] = useState<Partial<Restock>>({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
@@ -917,8 +985,43 @@ export default function App() {
       }
     });
 
+    // Integrated Low Stock Threshold on Product level
+    products.forEach(product => {
+      if (product.lowStockThreshold !== undefined && product.stockQuantity <= product.lowStockThreshold) {
+        const alreadyTriggered = triggeredAlerts.some(ta => ta.ruleId === 'manual-stock' && ta.message.includes(product.name));
+        if (!alreadyTriggered) {
+          newTriggered.push({
+            id: `stock-${product.id}-${Date.now()}`,
+            userId: userProfile?.ownerId || user?.uid || '',
+            storeId: product.storeId,
+            ruleId: 'manual-stock',
+            message: `STOCK ALERT: ${product.name} is low (${product.stockQuantity} ${product.unit} left). Threshold set at ${product.lowStockThreshold}.`,
+            timestamp: nowIso,
+            isRead: false
+          });
+        }
+      }
+    });
+
     if (newTriggered.length > 0) {
-      setTriggeredAlerts(prev => [...newTriggered, ...prev]);
+      const batch = writeBatch(db);
+      newTriggered.forEach(alert => {
+        const alertRef = doc(collection(db, 'triggeredAlerts'));
+        batch.set(alertRef, alert);
+
+        // Send actual browser device notification if enabled
+        if (userProfile?.externalNotificationsEnabled && "Notification" in window && Notification.permission === "granted") {
+          try {
+            new Notification("Rowina Sales Surveillance", {
+              body: alert.message,
+              icon: "/favicon.ico"
+            });
+          } catch (e) {
+            console.error("Failed to display device notification", e);
+          }
+        }
+      });
+      batch.commit().catch(err => handleFirestoreError(err, OperationType.CREATE, 'triggeredAlerts'));
     }
   }, [products, sales, alerts, stats]);
 
@@ -944,19 +1047,77 @@ export default function App() {
   }, [sales, expenses, paymentMethodFilter]);
 
   // Handlers
+  const generateAiStockInsights = async () => {
+    if (isGeneratingAi) return;
+    const lowStockProducts = products.filter(p => (p.lowStockThreshold !== undefined && p.stockQuantity <= p.lowStockThreshold) || p.stockQuantity <= 5);
+    if (lowStockProducts.length === 0) {
+      setGlobalError("Inventory healthy. No critical low stock detected.");
+      return;
+    }
+
+    setIsGeneratingAi(true);
+    try {
+      const productSummary = lowStockProducts.map(p => `- ${p.name}: ${p.stockQuantity} ${p.unit} remaining (Threshold: ${p.lowStockThreshold || 5}). Category: ${p.category}`).join('\n');
+      
+      const prompt = `You are "Rowina AI", a strategic retail analyst. Analyze the following low stock inventory for a business:
+${productSummary}
+
+Provide a concise, strategic advice (max 60 words) on which items to prioritize restock for today based on typical retail importance and the current levels. Sound professional, helpful, and slightly technical. Use a "Strategic Command" tone.`;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: prompt,
+      });
+
+      const insight = {
+        id: Math.random().toString(36).substr(2, 9),
+        text: result.text || "Strategic data stream interrupted. Please retry signal.",
+        type: 'stock' as const,
+        timestamp: new Date().toISOString()
+      };
+
+      setAiInsights(prev => [insight, ...prev].slice(0, 5));
+    } catch (err) {
+      console.error("AI Generation Error:", err);
+      setGlobalError("AI Neural Link failed. Check configuration.");
+    } finally {
+      setIsGeneratingAi(false);
+    }
+  };
+
   const handleAddProduct = async () => {
     if (isSubmitting) return;
     setIsSubmitting(true);
     setGlobalError(null);
     try {
-      if (!productForm.name) {
+      const trimmedName = (productForm.name || '').trim();
+      if (!trimmedName) {
         throw new Error("Product Name is required.");
       }
-      if ((productForm.buyingPrice || 0) < 0 || (productForm.sellingPrice || 0) < 0) {
+      if (trimmedName.length > 100) {
+        throw new Error("Product Name is too long (maximum 100 characters).");
+      }
+
+      const buyingPriceVal = Number(productForm.buyingPrice) || 0;
+      const sellingPriceVal = Number(productForm.sellingPrice) || 0;
+      const stockQtyVal = Number(productForm.stockQuantity) || 0;
+      const lowStockThreshVal = Number(productForm.lowStockThreshold) || 0;
+
+      if (isNaN(buyingPriceVal) || isNaN(sellingPriceVal) || isNaN(stockQtyVal) || isNaN(lowStockThreshVal)) {
+        throw new Error("Invalid numeric values detected in product data.");
+      }
+
+      if (buyingPriceVal < 0 || sellingPriceVal < 0) {
         throw new Error("Prices cannot be negative.");
       }
-      if ((productForm.stockQuantity || 0) < 0) {
+      if (buyingPriceVal > 1000000000 || sellingPriceVal > 1000000000) {
+        throw new Error("Price exceeds logical limits (max 1,000,000,000).");
+      }
+      if (stockQtyVal < 0) {
         throw new Error("Initial stock cannot be negative.");
+      }
+      if (stockQtyVal > 1000000) {
+        throw new Error("Initial stock exceeds logical limits (max 1,000,000).");
       }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
@@ -966,23 +1127,25 @@ export default function App() {
       const { id, ...data } = productForm;
       const payload = {
         ...data,
+        name: trimmedName,
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-        stockQuantity: productForm.stockQuantity || 0,
-        buyingPrice: productForm.buyingPrice || 0,
-        sellingPrice: productForm.sellingPrice || 0
+        stockQuantity: stockQtyVal,
+        buyingPrice: buyingPriceVal,
+        sellingPrice: sellingPriceVal,
+        lowStockThreshold: lowStockThreshVal
       };
 
       if (editingProduct) {
         const docRef = doc(db, 'products', editingProduct.id);
-        await updateDoc(docRef, payload);
+        await withTimeout(updateDoc(docRef, payload), 8000, "Saving product timed out. Please try again.");
         setEditingProduct(null);
       } else {
         const colRef = collection(db, 'products');
         const newDocRef = doc(colRef);
-        await setDoc(newDocRef, payload);
+        await withTimeout(setDoc(newDocRef, payload), 8000, "Creating product timed out. Please try again.");
       }
-      setProductForm({ name: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined });
+      setProductForm({ name: '', category: 'General', unit: 'pcs', stockQuantity: undefined, buyingPrice: undefined, sellingPrice: undefined, lowStockThreshold: 5 });
       setIsProductModalOpen(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Failed to save product";
@@ -1002,8 +1165,26 @@ export default function App() {
       const product = products.find(p => p.id === saleForm.productId);
       if (!product) throw new Error("Product not found.");
       
-      if (!saleForm.quantity || saleForm.quantity <= 0) throw new Error("Quantity must be greater than 0.");
-      if (saleForm.quantity > product.stockQuantity) throw new Error(`Insufficient stock. Available: ${product.stockQuantity}`);
+      const qtyVal = Number(saleForm.quantity);
+      const discountVal = Number(saleForm.discount) || 0;
+
+      if (isNaN(qtyVal) || qtyVal <= 0) {
+        throw new Error("Quantity must be a valid number greater than 0.");
+      }
+      if (qtyVal > product.stockQuantity) {
+        throw new Error(`Insufficient stock. Available: ${product.stockQuantity}`);
+      }
+      if (qtyVal > 1000000) {
+        throw new Error("Sale quantity exceeds logical limits.");
+      }
+      if (isNaN(discountVal) || discountVal < 0) {
+        throw new Error("Discount cannot be negative.");
+      }
+      
+      const totalPrice = qtyVal * product.sellingPrice;
+      if (discountVal > totalPrice) {
+        throw new Error("Discount cannot exceed total sale value.");
+      }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
@@ -1014,21 +1195,15 @@ export default function App() {
       const batch = writeBatch(db);
       const newSaleDocRef = doc(collection(db, 'sales'));
       
-      const quantityValue = Number(saleForm.quantity) || 0;
-      const discountValue = Number(saleForm.discount) || 0;
       const sellingPriceValue = Number(product.sellingPrice) || 0;
       const buyingPriceValue = Number(product.buyingPrice) || 0;
-
-      if (isNaN(quantityValue) || isNaN(discountValue) || isNaN(sellingPriceValue) || isNaN(buyingPriceValue)) {
-        throw new Error("Invalid numeric values detected in sale data.");
-      }
 
       const saleData = { 
         ...saleForm, 
         userId: ownerId,
         storeId,
-        quantity: quantityValue,
-        discount: discountValue,
+        quantity: qtyVal,
+        discount: discountVal,
         sellingPrice: sellingPriceValue,
         buyingPrice: buyingPriceValue,
         paymentMethod: saleForm.paymentMethod || 'Cash'
@@ -1038,14 +1213,14 @@ export default function App() {
       
       // Update stock safely
       const productDocRef = doc(db, 'products', product.id);
-      const newStock = (Number(product.stockQuantity) || 0) - quantityValue;
-      if (isNaN(newStock)) throw new Error("Invalid stock calculation.");
+      const newStock = (Number(product.stockQuantity) || 0) - qtyVal;
+      if (isNaN(newStock) || newStock < 0) throw new Error("Invalid stock calculation.");
       
       batch.update(productDocRef, { 
         stockQuantity: newStock
       });
 
-      await batch.commit();
+      await withTimeout(batch.commit(), 8000, "Recording sale timed out. Please try again.");
 
       setSaleForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, discount: undefined, paymentMethod: 'Cash' });
       setIsSaleModalOpen(false);
@@ -1063,20 +1238,35 @@ export default function App() {
     setIsSubmitting(true);
     setGlobalError(null);
     try {
-      if (!expenseForm.amount || expenseForm.amount <= 0) throw new Error("Amount must be greater than 0.");
-      if (!expenseForm.description) throw new Error("Description is required.");
+      const amountVal = Number(expenseForm.amount);
+      if (isNaN(amountVal) || amountVal <= 0) {
+        throw new Error("Amount must be a valid number greater than 0.");
+      }
+      if (amountVal > 1000000000) {
+        throw new Error("Expense amount exceeds logical limits.");
+      }
+
+      const trimmedDesc = (expenseForm.description || '').trim();
+      if (!trimmedDesc) {
+        throw new Error("Description is required.");
+      }
+      if (trimmedDesc.length > 200) {
+        throw new Error("Description is too long (maximum 200 characters).");
+      }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
       const colRef = collection(db, 'expenses');
       const newDocRef = doc(colRef);
-      await setDoc(newDocRef, { 
+      await withTimeout(setDoc(newDocRef, { 
         ...expenseForm, 
+        description: trimmedDesc,
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-        amount: expenseForm.amount || 0
-      });
+        amount: amountVal
+      }), 8000, "Recording expense timed out. Please try again.");
+      
       setExpenseForm({ date: format(new Date(), 'yyyy-MM-dd'), description: '', category: 'Other', amount: undefined });
       setIsExpenseModalOpen(false);
     } catch (err) {
@@ -1097,8 +1287,21 @@ export default function App() {
       const product = products.find(p => p.id === restockForm.productId);
       if (!product) throw new Error("Product not found.");
 
-      if (!restockForm.quantity || restockForm.quantity <= 0) throw new Error("Quantity must be greater than 0.");
-      if (restockForm.unitCost && restockForm.unitCost < 0) throw new Error("Unit cost cannot be negative.");
+      const qtyVal = Number(restockForm.quantity);
+      if (isNaN(qtyVal) || qtyVal <= 0) {
+        throw new Error("Quantity must be a valid number greater than 0.");
+      }
+      if (qtyVal > 10000000) {
+        throw new Error("Quantity exceeds logical upper limit.");
+      }
+
+      const unitCostVal = restockForm.unitCost !== undefined ? Number(restockForm.unitCost) : product.buyingPrice;
+      if (isNaN(unitCostVal) || unitCostVal < 0) {
+        throw new Error("Unit cost must be a valid non-negative number.");
+      }
+      if (unitCostVal > 1000000000) {
+        throw new Error("Unit cost exceeds logical upper limit.");
+      }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
@@ -1110,16 +1313,16 @@ export default function App() {
         ...restockForm, 
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-        quantity: restockForm.quantity || 0,
-        unitCost: restockForm.unitCost || product.buyingPrice 
+        quantity: qtyVal,
+        unitCost: unitCostVal 
       });
       
       const productDocRef = doc(db, 'products', product.id);
       batch.update(productDocRef, { 
-        stockQuantity: product.stockQuantity + (restockForm.quantity || 0) 
+        stockQuantity: product.stockQuantity + qtyVal 
       });
 
-      await batch.commit();
+      await withTimeout(batch.commit(), 8000, "Recording restock timed out. Please try again.");
 
       setRestockForm({ date: format(new Date(), 'yyyy-MM-dd'), productId: '', quantity: undefined, unitCost: undefined });
       setIsRestockModalOpen(false);
@@ -1137,21 +1340,32 @@ export default function App() {
     setIsSubmitting(true);
     setGlobalError(null);
     try {
-      if (!alertForm.name) throw new Error("Alert name is required.");
-      if (alertForm.threshold === undefined || alertForm.threshold < 0) throw new Error("Threshold must be 0 or greater.");
+      const trimmedName = (alertForm.name || '').trim();
+      if (!trimmedName) throw new Error("Alert name is required.");
+      if (trimmedName.length > 100) throw new Error("Alert name is too long.");
+
+      const thresholdVal = Number(alertForm.threshold);
+      if (isNaN(thresholdVal) || thresholdVal < 0) {
+        throw new Error("Threshold must be a valid non-negative number.");
+      }
+      if (thresholdVal > 1000000000) {
+        throw new Error("Threshold exceeds logical upper limit.");
+      }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
       const colRef = collection(db, 'alertRules');
       const newDocRef = doc(colRef);
-      await setDoc(newDocRef, { 
+      await withTimeout(setDoc(newDocRef, { 
         ...alertForm, 
+        name: trimmedName,
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-        threshold: alertForm.threshold || 0,
+        threshold: thresholdVal,
         createdAt: new Date().toISOString()
-      });
+      }), 8000, "Recording alert rule timed out. Please try again.");
+
       setAlertForm({ name: '', type: 'LOW_STOCK', threshold: undefined, isActive: true });
       setIsAlertModalOpen(false);
     } catch (err) {
@@ -1168,29 +1382,38 @@ export default function App() {
     setIsSubmitting(true);
     setGlobalError(null);
     try {
-      if (!clientForm.name) throw new Error("Client name is required.");
+      const trimmedName = (clientForm.name || '').trim();
+      if (!trimmedName) throw new Error("Client name is required.");
+      if (trimmedName.length > 100) throw new Error("Client name is too long.");
+
+      const trimmedPhone = (clientForm.phone || '').trim();
+      if (trimmedPhone.length > 30) throw new Error("Phone number is too long.");
+
+      const debtVal = clientForm.totalDebt !== undefined ? Number(clientForm.totalDebt) : 0;
+      if (isNaN(debtVal)) throw new Error("Total debt must be a valid number.");
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
 
+      const payload = {
+        name: trimmedName,
+        phone: trimmedPhone,
+        totalDebt: debtVal,
+        storeId
+      };
+
       if (editingClient) {
         const docRef = doc(db, 'clients', editingClient.id);
-        await updateDoc(docRef, { 
-          ...clientForm, 
-          storeId,
-          totalDebt: clientForm.totalDebt || 0 
-        });
+        await withTimeout(updateDoc(docRef, payload), 8000, "Saving client timed out. Please try again.");
         setEditingClient(null);
       } else {
         const colRef = collection(db, 'clients');
         const newDocRef = doc(colRef);
-        await setDoc(newDocRef, {
-          ...clientForm,
+        await withTimeout(setDoc(newDocRef, {
+          ...payload,
           userId: userProfile?.ownerId || user?.uid,
-          storeId,
-          totalDebt: clientForm.totalDebt || 0,
-          createdAt: new Date().toISOString()
-        });
+          createdAt: format(new Date(), 'yyyy-MM-dd')
+        }), 8000, "Creating client timed out. Please try again.");
       }
       setClientForm({ name: '', phone: '', totalDebt: undefined });
       setIsClientModalOpen(false);
@@ -1241,10 +1464,28 @@ export default function App() {
     setGlobalError(null);
     try {
       if (!selectedClient) throw new Error("Please select a client first.");
-      if (!clientTransactionForm.amount || clientTransactionForm.amount <= 0) throw new Error("Amount must be greater than 0.");
+      
+      const amountVal = Number(clientTransactionForm.amount);
+      if (isNaN(amountVal) || amountVal <= 0) {
+        throw new Error("Amount must be a valid number greater than 0.");
+      }
+      if (amountVal > 1000000000) {
+        throw new Error("Amount exceeds logical upper limit.");
+      }
+
+      const qtyVal = clientTransactionForm.quantity !== undefined ? Number(clientTransactionForm.quantity) : undefined;
+      if (qtyVal !== undefined && (isNaN(qtyVal) || qtyVal <= 0)) {
+        throw new Error("Quantity must be a valid number greater than 0.");
+      }
+
+      const trimmedDesc = (clientTransactionForm.description || '').trim();
+      if (trimmedDesc.length > 200) {
+        throw new Error("Description is too long.");
+      }
+
       if (clientTransactionForm.type === 'CREDIT' && clientTransactionForm.productId) {
         const product = products.find(p => p.id === clientTransactionForm.productId);
-        if (product && (clientTransactionForm.quantity || 0) > product.stockQuantity) {
+        if (product && (qtyVal || 0) > product.stockQuantity) {
           throw new Error(`Insufficient stock. Available: ${product.stockQuantity}`);
         }
       }
@@ -1258,10 +1499,10 @@ export default function App() {
       const transactionData: any = {
         date: clientTransactionForm.date || format(new Date(), 'yyyy-MM-dd'),
         type: clientTransactionForm.type || 'CREDIT',
-        description: clientTransactionForm.description || '',
+        description: trimmedDesc,
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-        amount: Number(clientTransactionForm.amount) || 0,
+        amount: amountVal,
         clientId: selectedClient.id
       };
       
@@ -1269,31 +1510,31 @@ export default function App() {
         transactionData.productId = clientTransactionForm.productId;
       }
       
-      if (clientTransactionForm.quantity !== undefined && clientTransactionForm.quantity !== null) {
-        transactionData.quantity = Number(clientTransactionForm.quantity);
+      if (qtyVal !== undefined) {
+        transactionData.quantity = qtyVal;
       }
       
       batch.set(newDocRef, transactionData);
       
       // Update client debt
-      const debtChange = clientTransactionForm.type === 'CREDIT' ? (clientTransactionForm.amount || 0) : -(clientTransactionForm.amount || 0);
+      const debtChange = clientTransactionForm.type === 'CREDIT' ? amountVal : -amountVal;
       const clientDocRef = doc(db, 'clients', selectedClient.id);
       batch.update(clientDocRef, { 
         totalDebt: selectedClient.totalDebt + debtChange 
       });
 
       // Update product stock if linked
-      if (clientTransactionForm.type === 'CREDIT' && clientTransactionForm.productId && clientTransactionForm.quantity) {
+      if (clientTransactionForm.type === 'CREDIT' && clientTransactionForm.productId && qtyVal) {
         const product = products.find(p => p.id === clientTransactionForm.productId);
         if (product) {
           const productDocRef = doc(db, 'products', product.id);
           batch.update(productDocRef, { 
-            stockQuantity: product.stockQuantity - (clientTransactionForm.quantity || 0) 
+            stockQuantity: product.stockQuantity - qtyVal 
           });
         }
       }
       
-      await batch.commit();
+      await withTimeout(batch.commit(), 8000, "Recording transaction timed out. Please try again.");
       
       setClientTransactionForm({
         date: format(new Date(), 'yyyy-MM-dd'), 
@@ -1317,8 +1558,20 @@ export default function App() {
     setIsSubmitting(true);
     setGlobalError(null);
     try {
-      if (!quotationForm.clientName) throw new Error("Client name is required.");
-      if (!quotationForm.items || quotationForm.items.length === 0) throw new Error("At least one item is required.");
+      const trimmedClientName = (quotationForm.clientName || '').trim();
+      if (!trimmedClientName) throw new Error("Client name is required.");
+      if (trimmedClientName.length > 100) throw new Error("Client name is too long.");
+
+      if (!quotationForm.items || quotationForm.items.length === 0) {
+        throw new Error("At least one item is required.");
+      }
+
+      // Validate quotation items
+      quotationForm.items.forEach((item, index) => {
+        if (!item.productId) throw new Error(`Item ${index + 1} has no product selected.`);
+        if (isNaN(item.quantity) || item.quantity <= 0) throw new Error(`Item ${index + 1} quantity must be greater than 0.`);
+        if (isNaN(item.price) || item.price < 0) throw new Error(`Item ${index + 1} price cannot be negative.`);
+      });
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
@@ -1326,13 +1579,12 @@ export default function App() {
       const colRef = collection(db, 'quotations');
       const newDocRef = doc(colRef);
       
-      // We don't create a client or debt for quotations yet, 
-      // as they are just estimates until converted.
-      await setDoc(newDocRef, {
+      await withTimeout(setDoc(newDocRef, {
         ...quotationForm,
+        clientName: trimmedClientName,
         userId: userProfile?.ownerId || user?.uid,
         storeId,
-      });
+      }), 8000, "Saving quotation timed out. Please try again.");
 
       setQuotationForm({
         clientName: '',
@@ -1356,8 +1608,29 @@ export default function App() {
     setIsSubmitting(true);
     setGlobalError(null);
     try {
-      if (!invoiceForm.clientName) throw new Error("Client name is required.");
-      if (!invoiceForm.items || invoiceForm.items.length === 0) throw new Error("At least one item is required.");
+      const trimmedClientName = (invoiceForm.clientName || '').trim();
+      if (!trimmedClientName) throw new Error("Client name is required.");
+      if (trimmedClientName.length > 100) throw new Error("Client name is too long.");
+
+      if (!invoiceForm.items || invoiceForm.items.length === 0) {
+        throw new Error("At least one item is required.");
+      }
+
+      // Validate invoice items
+      invoiceForm.items.forEach((item, index) => {
+        if (!item.productId) throw new Error(`Item ${index + 1} has no product selected.`);
+        if (isNaN(item.quantity) || item.quantity <= 0) throw new Error(`Item ${index + 1} quantity must be greater than 0.`);
+        if (isNaN(item.price) || item.price < 0) throw new Error(`Item ${index + 1} price cannot be negative.`);
+      });
+
+      const totalVal = Number(invoiceForm.totalAmount) || 0;
+      const paidVal = Number(invoiceForm.paidAmount) || 0;
+      if (isNaN(totalVal) || totalVal < 0 || isNaN(paidVal) || paidVal < 0) {
+        throw new Error("Total and Paid amounts must be valid non-negative numbers.");
+      }
+      if (paidVal > totalVal) {
+        throw new Error("Paid amount cannot exceed total invoice amount.");
+      }
 
       const storeId = selectedStoreId === 'ALL' ? (stores[0]?.id || '') : selectedStoreId;
       if (!storeId) throw new Error("Please select or create a store first.");
@@ -1372,14 +1645,14 @@ export default function App() {
         const clientRef = doc(collection(db, 'clients'));
         finalClientId = clientRef.id;
         batch.set(clientRef, {
-          name: invoiceForm.clientName,
+          name: trimmedClientName,
           email: '',
-          phone: 'N/A', // Required by rules
+          phone: 'N/A', 
           address: '',
           totalDebt: 0,
           userId,
           storeId,
-          createdAt: format(new Date(), 'yyyy-MM-dd') // Required by rules
+          createdAt: format(new Date(), 'yyyy-MM-dd') 
         });
       }
 
@@ -1387,15 +1660,18 @@ export default function App() {
       const newDocRef = doc(colRef);
       const invoiceData = {
         ...invoiceForm,
+        clientName: trimmedClientName,
         clientId: finalClientId,
         userId,
         storeId,
+        totalAmount: totalVal,
+        paidAmount: paidVal
       };
       
       batch.set(newDocRef, invoiceData);
 
       // 2. Add to client ledger and update debt
-      const balance = (invoiceForm.totalAmount || 0) - (invoiceForm.paidAmount || 0);
+      const balance = totalVal - paidVal;
       if (balance > 0) {
         batch.update(doc(db, 'clients', finalClientId), {
           totalDebt: increment(balance)
@@ -1413,7 +1689,7 @@ export default function App() {
         });
       }
 
-      await batch.commit();
+      await withTimeout(batch.commit(), 8000, "Saving invoice timed out. Please try again.");
 
       setInvoiceForm({
         clientName: '',
@@ -1633,20 +1909,60 @@ export default function App() {
 
   const handleAddStaff = async () => {
     if (isSubmitting) return;
+
+    // Plan Enforcement: Basic plan limited to 3 staff members
+    if (userRole === 'executive' && (userProfile?.plan || 'Free') === 'Basic') {
+      if (staff.length >= 3 && !editingStaff) {
+        setGlobalError("BASIC PLAN LIMIT: Maximum 3 staff members allowed. Upgrade to PRO for unlimited personnel.");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setGlobalError(null);
     try {
+      const trimmedDisplayName = (staffForm.displayName || '').trim();
+      const trimmedEmail = (staffForm.email || '').trim().toLowerCase();
+      
+      if (!trimmedDisplayName) {
+        throw new Error("Display name is required.");
+      }
+      if (trimmedDisplayName.length > 100) {
+        throw new Error("Display name is too long.");
+      }
+      if (!trimmedEmail) {
+        throw new Error("Email address is required.");
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(trimmedEmail)) {
+        throw new Error("Please enter a valid email address.");
+      }
+      if (trimmedEmail.length > 100) {
+        throw new Error("Email address is too long.");
+      }
+
+      const validRoles = ['owner', 'admin', 'employee', 'manager'];
+      if (!validRoles.includes(staffForm.role)) {
+        throw new Error("Invalid staff role selected.");
+      }
+
+      const payload = {
+        ...staffForm,
+        displayName: trimmedDisplayName,
+        email: trimmedEmail
+      };
+
       if (editingStaff) {
         const docRef = doc(db, 'users', editingStaff.id);
-        await updateDoc(docRef, staffForm);
+        await withTimeout(updateDoc(docRef, payload), 8000, "Saving staff details timed out. Please try again.");
         setEditingStaff(null);
       } else {
         // Use email as ID for pre-authorized staff so they can be found on first login
-        const docRef = doc(db, 'users', staffForm.email.toLowerCase());
-        await setDoc(docRef, {
-          ...staffForm,
+        const docRef = doc(db, 'users', trimmedEmail);
+        await withTimeout(setDoc(docRef, {
+          ...payload,
           ownerId: userProfile?.ownerId || user?.uid // Link staff to the owner of this account
-        });
+        }), 8000, "Pre-authorizing staff member timed out. Please try again.");
       }
       setStaffForm({ email: '', role: 'employee', displayName: '', assignedStoreIds: [], tempPassword: '' });
       setIsStaffModalOpen(false);
@@ -1660,27 +1976,52 @@ export default function App() {
   };
 
   const handleAddStore = async () => {
-    if (!storeForm.name.trim()) {
+    const trimmedName = (storeForm.name || '').trim();
+    if (!trimmedName) {
       setGlobalError("Store Name is required.");
+      return;
+    }
+    if (trimmedName.length > 100) {
+      setGlobalError("Store Name is too long (maximum 100 characters).");
+      return;
+    }
+
+    const trimmedLocation = (storeForm.location || '').trim();
+    if (trimmedLocation.length > 200) {
+      setGlobalError("Store Location is too long (maximum 200 characters).");
       return;
     }
     
     if (isSubmitting) return;
+
+    // Plan Enforcement: Basic plan limited to 1 store
+    if (userRole === 'executive' && (userProfile?.plan || 'Free') === 'Basic') {
+      if (stores.length >= 1 && !editingStore) {
+        setGlobalError("BASIC PLAN LIMIT: 1 store location allowed. Upgrade to PRO for unlimited expansion.");
+        return;
+      }
+    }
+
     setIsSubmitting(true);
     setGlobalError(null);
     try {
+      const payload = {
+        name: trimmedName,
+        location: trimmedLocation
+      };
+
       if (editingStore) {
         const docRef = doc(db, 'stores', editingStore.id);
-        await updateDoc(docRef, storeForm);
+        await withTimeout(updateDoc(docRef, payload), 8000, "Saving store details timed out. Please try again.");
         setEditingStore(null);
       } else {
         const colRef = collection(db, 'stores');
         const newDocRef = doc(colRef);
-        await setDoc(newDocRef, { 
-          ...storeForm, 
+        await withTimeout(setDoc(newDocRef, { 
+          ...payload, 
           userId: userProfile?.ownerId || user?.uid,
           createdAt: new Date().toISOString() 
-        });
+        }), 8000, "Creating store timed out. Please try again.");
       }
       setStoreForm({ name: '', location: '' });
       setIsStoreModalOpen(false);
@@ -2694,6 +3035,65 @@ export default function App() {
         </div>
       </header>
 
+      {/* External Notifications Command Banner (WhatsApp-Style) */}
+      {userProfile && (
+        <div className="bg-rowina-gray border border-zinc-800 p-5 rounded-[24px] mb-8 flex flex-col sm:flex-row sm:items-center justify-between gap-4 animate-in fade-in slide-in-from-top-4 duration-300">
+          <div className="flex items-center gap-4">
+            <div className={cn(
+              "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+              userProfile?.externalNotificationsEnabled ? "bg-rowina-blue/20 text-rowina-blue shadow-[0_0_15px_rgba(10,132,255,0.25)]" : "bg-zinc-800 text-zinc-500"
+            )}>
+              {userProfile?.externalNotificationsEnabled ? <Bell size={24} className="animate-bounce" /> : <BellOff size={24} />}
+            </div>
+            <div>
+              <h4 className="text-sm font-bold text-white tracking-tight uppercase">Device Notification Center</h4>
+              <p className="text-[10px] rowina-mono text-zinc-500 uppercase tracking-widest leading-none mt-1">
+                {userProfile?.externalNotificationsEnabled ? "WhatsApp-style desktop alerts active" : "Signals disabled • Click to authorize notifications"}
+              </p>
+            </div>
+          </div>
+          <button 
+            onClick={async () => {
+              const next = !userProfile.externalNotificationsEnabled;
+              if (next && "Notification" in window) {
+                const permission = await Notification.requestPermission();
+                if (permission !== "granted") {
+                  setGlobalError("Notification permission denied by device. Please reset browser site permissions.");
+                  return;
+                } else {
+                  try {
+                    new Notification("Rowina Sales", {
+                      body: "WhatsApp-style device alerts successfully synchronized!",
+                      icon: "/favicon.ico"
+                    });
+                  } catch (e) {
+                    console.error("Notification constructor error:", e);
+                  }
+                }
+              }
+              try {
+                await updateDoc(doc(db, 'users', userProfile.id), { externalNotificationsEnabled: next });
+                setUserProfile({ ...userProfile, externalNotificationsEnabled: next });
+              } catch (err) {
+                handleFirestoreError(err, OperationType.UPDATE, `users/${userProfile.id}`);
+              }
+            }}
+            className={cn(
+              "flex items-center gap-2 px-5 py-3 rounded-full font-bold rowina-mono text-[9px] tracking-widest transition-all hover:scale-[1.02] active:scale-[0.98]",
+              userProfile?.externalNotificationsEnabled 
+                ? "bg-rowina-blue text-black shadow-lg shadow-rowina-blue/20" 
+                : "bg-zinc-800 text-zinc-400 hover:text-white"
+            )}
+          >
+            {userProfile?.externalNotificationsEnabled ? "ONLINE / SYNCED" : "OFFLINE / CONNECT"}
+            <div className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              userProfile?.externalNotificationsEnabled ? "bg-black animate-ping" : "bg-zinc-600"
+            )} />
+          </button>
+        </div>
+      )}
+
       {/* Navigation */}
       <nav className="bg-rowina-gray rounded-2xl p-1.5 flex mb-12 border border-zinc-800/50 gap-2 overflow-x-auto no-scrollbar items-center">
         {[
@@ -2706,9 +3106,10 @@ export default function App() {
           { id: 'alerts', label: 'ALERTS' },
           { id: 'staff', label: 'STAFF' },
           { id: 'stores', label: 'STORES' },
+          { id: 'subscription', label: 'SUBSCRIPTION' },
           { id: 'security', label: 'SECURITY' },
           { id: 'help', label: 'HELP' },
-        ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores')).map((tab) => (
+        ].filter(tab => userRole === 'executive' || (tab.id !== 'alerts' && tab.id !== 'staff' && tab.id !== 'stores' && tab.id !== 'subscription')).map((tab) => (
           <button
             key={tab.id}
             onClick={() => {
@@ -2993,46 +3394,58 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {products
-                    .filter(p => p.name.toLowerCase().includes(productsSearch.toLowerCase()))
-                    .map(product => {
-                      const productSales = sales.filter(s => s.productId === product.id);
-                      const totalProfit = productSales.reduce((acc, sale) => {
-                        const revenue = (sale.quantity * sale.sellingPrice) - sale.discount;
-                        const cost = sale.quantity * product.buyingPrice;
-                        return acc + (revenue - cost);
-                      }, 0);
+                  {products.filter(p => p.name.toLowerCase().includes(productsSearch.toLowerCase())).length === 0 ? (
+                    <div className="col-span-full">
+                      <EmptyState
+                        icon={Package}
+                        title={productsSearch ? "No matching products" : "No products found"}
+                        description={productsSearch ? "Try checking for spelling or adjusting your filter" : "Your product catalog is empty. Populate your stock catalog to start trading."}
+                        actionLabel="ADD PRODUCT"
+                        onAction={() => requireAuth(() => setIsProductModalOpen(true))}
+                      />
+                    </div>
+                  ) : (
+                    products
+                      .filter(p => p.name.toLowerCase().includes(productsSearch.toLowerCase()))
+                      .map(product => {
+                        const productSales = sales.filter(s => s.productId === product.id);
+                        const totalProfit = productSales.reduce((acc, sale) => {
+                          const revenue = (sale.quantity * sale.sellingPrice) - sale.discount;
+                          const cost = sale.quantity * product.buyingPrice;
+                          return acc + (revenue - cost);
+                        }, 0);
 
-                      return (
-                        <div 
-                          key={product.id} 
-                          onClick={() => setSelectedProductId(product.id)}
-                          className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center group cursor-pointer hover:border-rowina-blue/50 transition-all"
-                        >
-                          <div>
-                            <h4 className="font-bold text-white mb-1">{product.name}</h4>
-                            <p className="rowina-mono text-[10px] text-zinc-500">{product.stockQuantity} {product.unit} REMAINING</p>
-                            {userRole === 'executive' && (
-                              <p className="rowina-mono text-[9px] text-emerald-500 mt-2">TOTAL PROFIT: {f(totalProfit)}</p>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <div className="flex items-center justify-end gap-2">
+                        return (
+                          <div 
+                            key={product.id} 
+                            onClick={() => setSelectedProductId(product.id)}
+                            className="bg-rowina-gray border border-zinc-800 p-6 rounded-3xl flex justify-between items-center group cursor-pointer hover:border-rowina-blue/50 transition-all"
+                          >
+                            <div>
+                              <h4 className="font-bold text-white mb-1">{product.name}</h4>
+                              <p className="rowina-mono text-[10px] text-zinc-500">{product.stockQuantity} {product.unit} REMAINING</p>
                               {userRole === 'executive' && (
-                                <span className="text-[10px] rowina-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
-                                  {calculateMargin(product.buyingPrice, product.sellingPrice).toFixed(1)}%
-                                </span>
+                                <p className="rowina-mono text-[9px] text-emerald-500 mt-2">TOTAL PROFIT: {f(totalProfit)}</p>
                               )}
-                              <p className="text-rowina-blue font-bold">{f(product.sellingPrice)}</p>
                             </div>
-                            <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                              <button onClick={(e) => { e.stopPropagation(); requireAuth(() => { setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); }); }} className="text-zinc-500 hover:text-white"><Edit3 size={14} /></button>
-                              <button onClick={(e) => { e.stopPropagation(); requireAuth(() => handleDeleteProduct(product.id)); }} className="text-zinc-500 hover:text-rose-500"><Trash2 size={14} /></button>
+                            <div className="text-right">
+                              <div className="flex items-center justify-end gap-2">
+                                {userRole === 'executive' && (
+                                  <span className="text-[10px] rowina-mono text-emerald-500 bg-emerald-500/10 px-2 py-0.5 rounded">
+                                    {calculateMargin(product.buyingPrice, product.sellingPrice).toFixed(1)}%
+                                  </span>
+                                )}
+                                <p className="text-rowina-blue font-bold">{f(product.sellingPrice)}</p>
+                              </div>
+                              <div className="flex gap-2 mt-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                <button onClick={(e) => { e.stopPropagation(); requireAuth(() => { setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); }); }} className="text-zinc-500 hover:text-white"><Edit3 size={14} /></button>
+                                <button onClick={(e) => { e.stopPropagation(); requireAuth(() => handleDeleteProduct(product.id)); }} className="text-zinc-500 hover:text-rose-500"><Trash2 size={14} /></button>
+                              </div>
                             </div>
                           </div>
-                        </div>
-                      );
-                    })}
+                        );
+                      })
+                  )}
                 </div>
               </>
             ) : (
@@ -3065,9 +3478,34 @@ export default function App() {
                   const productSales = sales.filter(s => s.productId === product.id);
                   const totalProfit = productSales.reduce((acc, sale) => {
                     const revenue = (sale.quantity * sale.sellingPrice) - sale.discount;
-                    const cost = sale.quantity * product.buyingPrice;
+                    const cost = sale.quantity * (sale.buyingPrice ?? product.buyingPrice);
                     return acc + (revenue - cost);
                   }, 0);
+
+                  // Calculate 30-day profit margin trend data
+                  const last30DaysTrend = Array.from({ length: 30 }).map((_, i) => {
+                    const d = subDays(new Date(), 29 - i);
+                    const dateStr = format(d, 'yyyy-MM-dd');
+                    const daySales = productSales.filter(s => s.date === dateStr);
+                    const dayRevenue = daySales.reduce((acc, s) => acc + (s.quantity * s.sellingPrice - s.discount), 0);
+                    const dayCost = daySales.reduce((acc, s) => acc + (s.quantity * (s.buyingPrice ?? product.buyingPrice)), 0);
+                    const dayProfit = dayRevenue - dayCost;
+                    const defaultMargin = product.sellingPrice > 0 
+                      ? round(((product.sellingPrice - product.buyingPrice) / product.sellingPrice) * 100) 
+                      : 0;
+                    const margin = dayRevenue > 0 ? round((dayProfit / dayRevenue) * 100) : defaultMargin;
+
+                    return {
+                      date: format(d, 'MMM dd'),
+                      margin: margin,
+                      profit: round(dayProfit),
+                      hasSales: daySales.length > 0
+                    };
+                  });
+
+                  const avgMargin = last30DaysTrend.length > 0
+                    ? round(last30DaysTrend.reduce((acc, curr) => acc + curr.margin, 0) / last30DaysTrend.length)
+                    : 0;
 
                   return (
                     <>
@@ -3076,12 +3514,67 @@ export default function App() {
                           <h2 className="text-2xl sm:text-4xl font-bold rowina-title mb-2">{product.name}</h2>
                           <p className="rowina-mono text-[10px] sm:text-xs text-zinc-500">{product.category}</p>
                         </div>
-                        {userRole === 'executive' && (
-                          <div className="text-left sm:text-right">
-                            <p className="rowina-mono text-[10px] text-zinc-500 mb-1 uppercase">Total Profit</p>
-                            <p className="text-2xl sm:text-3xl font-bold text-emerald-500 break-all">{f(totalProfit)}</p>
-                          </div>
-                        )}
+                        <div className="flex items-center gap-4 text-left sm:text-right self-stretch sm:self-auto justify-between sm:justify-end flex-wrap">
+                          {userRole === 'executive' && (
+                            <div className="flex items-center gap-3 bg-rowina-gray/60 p-2.5 sm:px-4 sm:py-3 rounded-2xl border border-zinc-800/80">
+                              <div>
+                                <p className="rowina-mono text-[9px] text-zinc-500 mb-0.5 uppercase tracking-wider">Total Profit</p>
+                                <p className="text-xl sm:text-2xl font-bold text-emerald-500 break-all leading-tight">{f(totalProfit)}</p>
+                              </div>
+
+                              {/* Profit Margin Sparkline */}
+                              <div className="flex items-center gap-2 pl-3 border-l border-zinc-800">
+                                <div className="w-20 sm:w-28 h-8 sm:h-9">
+                                  <ResponsiveContainer width="100%" height="100%">
+                                    <AreaChart data={last30DaysTrend} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
+                                      <defs>
+                                        <linearGradient id="profitMarginGrad" x1="0" y1="0" x2="0" y2="1">
+                                          <stop offset="5%" stopColor="#10b981" stopOpacity={0.4}/>
+                                          <stop offset="95%" stopColor="#10b981" stopOpacity={0.0}/>
+                                        </linearGradient>
+                                      </defs>
+                                      <Tooltip
+                                        content={({ active, payload }) => {
+                                          if (active && payload && payload.length) {
+                                            const data = payload[0].payload;
+                                            return (
+                                              <div className="bg-zinc-950 border border-zinc-800 px-2 py-1 rounded text-[10px] rowina-mono shadow-xl z-50">
+                                                <p className="text-zinc-400">{data.date}</p>
+                                                <p className="text-emerald-400 font-bold">{data.margin}% Margin</p>
+                                                {data.hasSales && <p className="text-zinc-300">{f(data.profit)} Profit</p>}
+                                              </div>
+                                            );
+                                          }
+                                          return null;
+                                        }}
+                                      />
+                                      <Area
+                                        type="monotone"
+                                        dataKey="margin"
+                                        stroke="#10b981"
+                                        strokeWidth={2}
+                                        fillOpacity={1}
+                                        fill="url(#profitMarginGrad)"
+                                        isAnimationActive={true}
+                                      />
+                                    </AreaChart>
+                                  </ResponsiveContainer>
+                                </div>
+                                <div className="hidden sm:block text-left">
+                                  <p className="rowina-mono text-[8px] text-zinc-500 uppercase tracking-tighter">30D Avg Margin</p>
+                                  <p className="text-xs font-bold text-emerald-400 rowina-mono">{avgMargin}%</p>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+                          <button 
+                            onClick={() => requireAuth(() => { setEditingProduct(product); setProductForm(product); setIsProductModalOpen(true); })}
+                            className="text-zinc-400 hover:text-white p-3 rounded-full border border-zinc-800 hover:border-zinc-700 bg-zinc-900/60 hover:bg-zinc-900 transition-all flex items-center justify-center cursor-pointer shadow-sm self-center"
+                            title="Edit Product"
+                          >
+                            <Edit3 size={18} />
+                          </button>
+                        </div>
                       </div>
 
                       <div className={cn("grid gap-4", userRole === 'executive' ? "grid-cols-1 sm:grid-cols-3" : "grid-cols-1 sm:grid-cols-2")}>
@@ -3442,7 +3935,17 @@ export default function App() {
                         </div>
                       );
                     })}
-                  {sales.length === 0 && <p className="text-center py-12 text-zinc-600 rowina-mono text-xs italic">NO RECEIPTS FOUND</p>}
+                  {sales
+                    .filter(sale => {
+                      const product = products.find(p => p.id === sale.productId);
+                      return product?.name.toLowerCase().includes(receiptsSearch.toLowerCase()) || sale.paymentMethod.toLowerCase().includes(receiptsSearch.toLowerCase());
+                    }).length === 0 && (
+                      <EmptyState
+                        icon={Printer}
+                        title="No Receipts Found"
+                        description={receiptsSearch ? "No receipts match your search filter." : "Complete transactions to generate automated printable business receipts."}
+                      />
+                  )}
                 </div>
               </div>
             )}
@@ -3484,7 +3987,25 @@ export default function App() {
                         </div>
                       </div>
                     ))}
-                  {invoices.length === 0 && <p className="text-center py-12 text-zinc-600 rowina-mono text-xs italic">NO INVOICES FOUND</p>}
+                  {invoices.length === 0 && (
+                    <EmptyState
+                      icon={CreditCard}
+                      title="No Invoices Found"
+                      description="Generate client invoices to demand pending payments."
+                      actionLabel="NEW INVOICE"
+                      onAction={() => requireAuth(() => {
+                        setInvoiceForm({
+                          clientName: '',
+                          date: format(new Date(), 'yyyy-MM-dd'),
+                          items: [],
+                          status: 'Pending',
+                          totalAmount: 0,
+                          paidAmount: 0
+                        });
+                        setIsInvoiceModalOpen(true);
+                      })}
+                    />
+                  )}
                 </div>
               </div>
             )}
@@ -3522,7 +4043,24 @@ export default function App() {
                         </div>
                       </div>
                     ))}
-                  {quotations.length === 0 && <p className="text-center py-12 text-zinc-600 rowina-mono text-xs italic">NO QUOTATIONS FOUND</p>}
+                  {quotations.length === 0 && (
+                    <EmptyState
+                      icon={FileText}
+                      title="No Quotations Found"
+                      description="Create quotations or price estimates to pitch to prospective clients."
+                      actionLabel="NEW QUOTE"
+                      onAction={() => requireAuth(() => {
+                        setQuotationForm({
+                          clientName: '',
+                          date: format(new Date(), 'yyyy-MM-dd'),
+                          items: [],
+                          status: 'Draft',
+                          totalAmount: 0
+                        });
+                        setIsQuotationModalOpen(true);
+                      })}
+                    />
+                  )}
                 </div>
               </div>
             )}
@@ -3657,8 +4195,19 @@ export default function App() {
             <div className="flex justify-between items-center">
               <h2 className="text-2xl font-bold rowina-title">Intelligence Reports</h2>
               <button 
-                onClick={() => requireAuth(exportToPDF)}
-                className="flex items-center gap-2 bg-rowina-blue text-black px-6 py-3 rounded-full font-bold rowina-mono text-[10px] tracking-widest hover:scale-105 transition-transform"
+                onClick={() => {
+                  if ((userProfile?.plan || 'Free') === 'Basic') {
+                    setGlobalError("BASIC PLAN LIMIT: PDF Export is a PRO feature. Upgrade to unlock intelligence reports.");
+                    return;
+                  }
+                  requireAuth(exportToPDF);
+                }}
+                className={cn(
+                  "flex items-center gap-2 px-6 py-3 rounded-full font-bold rowina-mono text-[10px] tracking-widest transition-all",
+                  (userProfile?.plan || 'Free') === 'Basic' 
+                    ? "bg-zinc-800 text-zinc-500 cursor-not-allowed border border-zinc-700" 
+                    : "bg-rowina-blue text-black hover:scale-105 shadow-lg shadow-rowina-blue/20"
+                )}
               >
                 <Download size={16} /> EXPORT PDF
               </button>
@@ -3692,6 +4241,44 @@ export default function App() {
 
               return (
                 <div className="space-y-8">
+                  {/* Global Neural Sync Header */}
+                  <div className="bg-rowina-gray border border-zinc-800 p-6 rounded-[32px] flex flex-col sm:flex-row items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className={cn(
+                        "w-12 h-12 rounded-2xl flex items-center justify-center transition-all",
+                        userProfile?.externalNotificationsEnabled ? "bg-rowina-blue/20 text-rowina-blue shadow-[0_0_15px_rgba(37,99,235,0.2)]" : "bg-zinc-800 text-zinc-600"
+                      )}>
+                        {userProfile?.externalNotificationsEnabled ? <Bell size={24} /> : <BellOff size={24} />}
+                      </div>
+                      <div>
+                        <h3 className="text-white font-bold text-sm tracking-tight">EXTERNAL SIGNALS</h3>
+                        <p className="text-zinc-500 text-[10px] rowina-mono uppercase tracking-widest leading-none mt-1">Push notifications outside the terminal</p>
+                      </div>
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        if (!userProfile) return;
+                        const next = !userProfile.externalNotificationsEnabled;
+                        try {
+                          await updateDoc(doc(db, 'users', userProfile.id), { externalNotificationsEnabled: next });
+                          setUserProfile({ ...userProfile, externalNotificationsEnabled: next });
+                        } catch (err) {
+                          handleFirestoreError(err, OperationType.UPDATE, `users/${userProfile.id}`);
+                        }
+                      }}
+                      className={cn(
+                        "flex items-center gap-2 px-6 py-3 rounded-full font-bold rowina-mono text-[10px] tracking-widest transition-all",
+                        userProfile?.externalNotificationsEnabled ? "bg-rowina-blue text-black shadow-lg shadow-rowina-blue/20" : "bg-zinc-800 text-zinc-400"
+                      )}
+                    >
+                      {userProfile?.externalNotificationsEnabled ? "SYNC ACTIVE" : "SYNC OFFLINE"}
+                      <div className={cn(
+                        "w-2 h-2 rounded-full",
+                        userProfile?.externalNotificationsEnabled ? "bg-black animate-pulse" : "bg-zinc-600"
+                      )} />
+                    </button>
+                  </div>
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div className="bg-rowina-gray p-5 sm:p-6 rounded-[32px] border border-zinc-800 relative min-h-[110px] flex flex-col justify-between">
                       <p className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">Daily Revenue</p>
@@ -3812,6 +4399,69 @@ export default function App() {
               </div>
             </div>
 
+            {/* AI Strategic Insights */}
+            <div className="bg-gradient-to-br from-rowina-blue/20 to-transparent border border-rowina-blue/30 rounded-[32px] p-8 space-y-6 relative overflow-hidden group">
+              <div className="absolute top-0 right-0 p-6 opacity-5 group-hover:opacity-10 transition-opacity">
+                <Sparkles size={120} />
+              </div>
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                <div className="flex items-center gap-4">
+                  <div className="w-12 h-12 bg-rowina-blue text-black rounded-full flex items-center justify-center shadow-[0_0_20px_rgba(37,99,235,0.4)]">
+                    <Sparkles size={24} />
+                  </div>
+                  <div>
+                    <h3 className="text-xl font-bold text-white tracking-tight uppercase">AI Strategic Command</h3>
+                    <p className="rowina-mono text-[10px] text-rowina-blue uppercase tracking-widest font-bold">Neural Inventory Logistics</p>
+                  </div>
+                </div>
+                <button 
+                  onClick={generateAiStockInsights}
+                  disabled={isGeneratingAi}
+                  className={cn(
+                    "flex items-center gap-2 px-6 py-3 rounded-full font-bold rowina-mono text-[10px] tracking-widest transition-all",
+                    isGeneratingAi ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-rowina-blue text-black hover:scale-105 active:scale-95 shadow-lg shadow-rowina-blue/20"
+                  )}
+                >
+                  {isGeneratingAi ? <RefreshCw size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  INITIALIZE SCAN
+                </button>
+              </div>
+
+              <div className="space-y-4 relative z-10">
+                {aiInsights.length === 0 ? (
+                  <div className="bg-black/40 border border-zinc-800/50 rounded-2xl p-8 text-center border-dashed">
+                    <p className="rowina-mono text-[10px] text-zinc-500">SYSTEM IDLE. NO STRATEGIC DATA BROADCASTS DETECTED. SCAN INVENTORY TO ACTIVATE NEURAL LINK.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    {aiInsights.map((insight) => (
+                      <motion.div 
+                        initial={{ opacity: 0, x: -20 }}
+                        animate={{ opacity: 1, x: 0 }}
+                        key={insight.id} 
+                        className="bg-black/40 border border-zinc-800/30 rounded-2xl p-6 relative overflow-hidden backdrop-blur-sm"
+                      >
+                        <div className="absolute top-0 left-0 w-1.5 h-full bg-rowina-blue" />
+                        <div className="flex items-start gap-4">
+                          <div className="mt-1 text-rowina-blue p-2 bg-rowina-blue/5 rounded-lg text-emerald-400">
+                            <Sparkles size={14} />
+                          </div>
+                          <div className="space-y-2 flex-1">
+                            <p className="text-sm text-zinc-200 leading-relaxed font-medium italic">"{insight.text}"</p>
+                            <div className="flex items-center justify-between">
+                              <p className="rowina-mono text-[8px] text-zinc-600 uppercase font-bold tracking-tighter">Strategic Intelligence • Sector-7 Inventory</p>
+                              <p className="rowina-mono text-[8px] text-zinc-600 uppercase font-bold">{format(parseISO(insight.timestamp), 'HH:mm • MMM dd')}</p>
+                            </div>
+                          </div>
+                        </div>
+                      </motion.div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+
             {/* Triggered Alerts Section */}
             {triggeredAlerts.length > 0 && (
               <div className="space-y-4">
@@ -3884,11 +4534,13 @@ export default function App() {
                 </div>
               </div>
               {alerts.filter(a => a.name.toLowerCase().includes(alertsSearch.toLowerCase())).length === 0 ? (
-                <div className="bg-rowina-gray/30 border border-dashed border-zinc-800 p-12 rounded-[2rem] text-center">
-                  <Activity className="mx-auto text-zinc-800 mb-4" size={32} />
-                  <p className="rowina-mono text-[10px] text-zinc-600">{alertsSearch ? 'NO MATCHING RULES FOUND' : 'NO ACTIVE SURVEILLANCE RULES'}</p>
-                  <button onClick={() => setIsAlertModalOpen(true)} className="mt-4 text-[10px] rowina-mono text-rowina-blue hover:underline">INITIALIZE RULE</button>
-                </div>
+                <EmptyState
+                  icon={Shield}
+                  title={alertsSearch ? "No Matching Rules" : "No Surveillance Rules"}
+                  description={alertsSearch ? "Try checking for spelling or adjusting your filter" : "Add custom surveillance and automated stock monitoring alert rules."}
+                  actionLabel="INITIALIZE RULE"
+                  onAction={() => setIsAlertModalOpen(true)}
+                />
               ) : (
                 <div className="space-y-3">
                   {alerts
@@ -4499,6 +5151,245 @@ export default function App() {
             </div>
           </motion.div>
         )}
+
+        {activeTab === 'subscription' && (
+          <motion.div 
+            key="subscription"
+            initial={{ opacity: 0, y: 20 }} 
+            animate={{ opacity: 1, y: 0 }} 
+            className="space-y-12 pb-24"
+          >
+            <div className="text-center space-y-4">
+              <h2 className="text-5xl font-black text-white tracking-tight leading-tight">Available plans</h2>
+              <p className="text-zinc-500 max-w-xl mx-auto rowina-mono text-[10px] uppercase tracking-[0.2em] font-bold">Scaling Excellence</p>
+            </div>
+
+            <div className="flex justify-center gap-2">
+              {['1', '3', '6', '12'].map((cycle) => (
+                <button
+                  key={cycle}
+                  onClick={() => setBillingCycle(cycle as any)}
+                  className={cn(
+                    "px-6 py-2 rounded-full font-bold rowina-mono text-[10px] transition-all",
+                    billingCycle === cycle 
+                      ? "bg-rowina-blue text-black shadow-lg" 
+                      : "bg-zinc-900 text-zinc-500 hover:text-white"
+                  )}
+                >
+                  {cycle === '12' ? '1 YEAR' : cycle + ' MONTH' + (cycle === '1' ? '' : 'S')}
+                </button>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-8 max-w-5xl mx-auto">
+              {/* Basic Tier - Spotify Style */}
+              {(() => {
+                const monthlyPrice = 16000;
+                const prices: Record<string, number> = { '1': 16000, '3': 37500, '6': 75000, '12': 150000 };
+                const isEligibleForTrial = !userProfile?.hasSubscribed && (userProfile?.plan || 'Free') === 'Free';
+                const isTrial = isEligibleForTrial && billingCycle === '1';
+                const price = isTrial ? 0 : prices[billingCycle];
+
+                return (
+                  <div className="bg-[#121212] rounded-xl border border-zinc-800 overflow-hidden flex flex-col hover:border-zinc-700 transition-colors relative">
+                    {billingCycle === '12' && (
+                      <div className="absolute top-4 right-4 bg-emerald-500 text-black px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter shadow-lg z-10">
+                        2 Months Free
+                      </div>
+                    )}
+                    {isTrial && (
+                      <div className="bg-[#FFD2D7] text-black px-4 py-1.5 inline-block w-fit m-4 rounded-md text-[11px] font-bold">
+                        UGX 0 for 1 month
+                      </div>
+                    )}
+                    
+                    <div className="p-8 pt-4 space-y-6 flex-1 flex flex-col">
+                      <div className="flex items-center gap-2 text-white">
+                        <CheckCircle2 size={24} className="text-[#FFD2D7]" />
+                        <span className="font-bold text-sm">Individual</span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <h3 className="text-4xl font-black text-white">Rowina Basic</h3>
+                        <div className="space-y-1">
+                          <p className="text-xl font-bold text-white">
+                            {isTrial ? "UGX 0 for 1 month" : `UGX ${price.toLocaleString()} for ${billingCycle} months`}
+                          </p>
+                          <p className="text-zinc-500 text-[13px]">
+                            {isTrial ? `UGX ${monthlyPrice.toLocaleString()}/month after` : `Approx UGX ${(price/parseInt(billingCycle)).toLocaleString()}/month`}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="h-[1px] bg-zinc-800/50 w-full" />
+
+                      <ul className="space-y-3 flex-1">
+                        {billingCycle === '12' && (
+                          <li className="flex items-start gap-3 text-sm text-[#FFD2D7] font-bold animate-pulse">
+                            <div className="w-1.5 h-1.5 rounded-full bg-[#FFD2D7] mt-2 shrink-0" />
+                            Includes 2 months free
+                          </li>
+                        )}
+                        <li className="flex items-start gap-3 text-sm text-zinc-300">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-2 shrink-0" />
+                          1 Physical Store Location
+                        </li>
+                        <li className="flex items-start gap-3 text-sm text-zinc-300">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-2 shrink-0" />
+                          Up to 3 Specialized Staff
+                        </li>
+                        <li className="flex items-start gap-3 text-sm text-zinc-300">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-2 shrink-0" />
+                          Core Inventory Management
+                        </li>
+                      </ul>
+
+                      <button 
+                        onClick={() => {
+                            setConfirmModal({
+                                isOpen: true,
+                                title: isTrial ? "TRY 1 MONTH FOR UGX 0" : `ACTIVATE BASIC`,
+                                message: isTrial 
+                                  ? "Start your 1-month free trial of Rowina Basic? No charges today."
+                                  : `Activate Basic infrastructure for UGX ${price.toLocaleString()}?`,
+                                onConfirm: async () => {
+                                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    try {
+                                        setIsSubmitting(true);
+                                        const userRef = doc(db, 'users', user!.uid);
+                                        await updateDoc(userRef, { 
+                                          plan: 'Basic',
+                                          hasSubscribed: true 
+                                        });
+                                        setUserProfile(prev => prev ? { ...prev, plan: 'Basic', hasSubscribed: true } : null);
+                                    } catch (err) {
+                                        setGlobalError("GATEWAY TEMPORARILY OFFLINE...");
+                                    } finally {
+                                        setIsSubmitting(false);
+                                    }
+                                }
+                            });
+                        }}
+                        className="w-full bg-[#FFD2D7] text-black py-4 rounded-full font-bold text-sm tracking-tight transition-transform active:scale-95 mt-6"
+                      >
+                        {isTrial ? "Try 1 month for UGX 0" : "Get Basic"}
+                      </button>
+                      
+                      <p className="text-[10px] text-zinc-500 leading-relaxed mt-4">
+                        {isTrial 
+                          ? `UGX 0 for 1 month, then UGX ${monthlyPrice.toLocaleString()} per month after. Offer only available if you haven't tried Premium before and you subscribe via Mobile Money or Card. Terms apply.`
+                          : `Plan billed every ${billingCycle} months. Cancel anytime to stop future billing.`}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+
+              {/* Pro Tier - Spotify Style */}
+              {(() => {
+                const monthlyPrice = 25000;
+                const prices: Record<string, number> = { '1': 25000, '3': 60000, '6': 115000, '12': 230000 };
+                const isEligibleForTrial = !userProfile?.hasSubscribed && (userProfile?.plan || 'Free') === 'Free';
+                const isTrial = isEligibleForTrial && billingCycle === '1';
+                const price = isTrial ? 0 : prices[billingCycle];
+
+                return (
+                  <div className="bg-[#121212] rounded-xl border border-zinc-800 overflow-hidden flex flex-col hover:border-zinc-700 transition-colors relative">
+                    {billingCycle === '12' && (
+                      <div className="absolute top-4 right-4 bg-emerald-500 text-black px-2 py-0.5 rounded text-[9px] font-black uppercase tracking-tighter shadow-lg z-10">
+                        2 Months Free
+                      </div>
+                    )}
+                    {isTrial && (
+                      <div className="bg-rowina-blue text-black px-4 py-1.5 inline-block w-fit m-4 rounded-md text-[11px] font-bold">
+                        UGX 0 for 1 month
+                      </div>
+                    )}
+                    
+                    <div className="p-8 pt-4 space-y-6 flex-1 flex flex-col">
+                      <div className="flex items-center gap-2 text-white">
+                        <CheckCircle2 size={24} className="text-rowina-blue" />
+                        <span className="font-bold text-sm">Enterprise</span>
+                      </div>
+
+                      <div className="space-y-1">
+                        <h3 className="text-4xl font-black text-white">Rowina Pro</h3>
+                        <div className="space-y-1">
+                          <p className="text-xl font-bold text-white">
+                            {isTrial ? "UGX 0 for 1 month" : `UGX ${price.toLocaleString()} for ${billingCycle} months`}
+                          </p>
+                          <p className="text-zinc-500 text-[13px]">
+                            {isTrial ? `UGX ${monthlyPrice.toLocaleString()}/month after` : `Approx UGX ${(price/parseInt(billingCycle)).toLocaleString()}/month`}
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="h-[1px] bg-zinc-800/50 w-full" />
+
+                      <ul className="space-y-3 flex-1">
+                        {billingCycle === '12' && (
+                          <li className="flex items-start gap-3 text-sm text-rowina-blue font-bold animate-pulse">
+                            <div className="w-1.5 h-1.5 rounded-full bg-rowina-blue mt-2 shrink-0" />
+                            Includes 2 months free
+                          </li>
+                        )}
+                        <li className="flex items-start gap-3 text-sm text-zinc-300">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-2 shrink-0" />
+                          Unlimited Store Locations
+                        </li>
+                        <li className="flex items-start gap-3 text-sm text-zinc-300">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-2 shrink-0" />
+                          Unlimited Personnel Access
+                        </li>
+                        <li className="flex items-start gap-3 text-sm text-zinc-300">
+                          <div className="w-1.5 h-1.5 rounded-full bg-zinc-300 mt-2 shrink-0" />
+                          WhatsApp Invoice Direct
+                        </li>
+                      </ul>
+
+                      <button 
+                        onClick={() => {
+                            setConfirmModal({
+                                isOpen: true,
+                                title: isTrial ? "TRY 1 MONTH FOR UGX 0" : `UPGRADE PRO`,
+                                message: isTrial 
+                                  ? "Start your 1-month free trial of Rowina Pro? Unlock everything for $0."
+                                  : `Unlock the full enterprise suite for UGX ${price.toLocaleString()}?`,
+                                onConfirm: async () => {
+                                    setConfirmModal(prev => ({ ...prev, isOpen: false }));
+                                    try {
+                                        setIsSubmitting(true);
+                                        const userRef = doc(db, 'users', user!.uid);
+                                        await updateDoc(userRef, { 
+                                          plan: 'Pro',
+                                          hasSubscribed: true
+                                        });
+                                        setUserProfile(prev => prev ? { ...prev, plan: 'Pro', hasSubscribed: true } : null);
+                                    } catch (err) {
+                                        setGlobalError("ENTERPRISE ENCRYPTION LOADING...");
+                                    } finally {
+                                        setIsSubmitting(false);
+                                    }
+                                }
+                            });
+                        }}
+                        className="w-full bg-rowina-blue text-black py-4 rounded-full font-bold text-sm tracking-tight transition-transform active:scale-95 mt-6 shadow-lg shadow-rowina-blue/10"
+                      >
+                        {isTrial ? "Try 1 month for UGX 0" : "Get Pro"}
+                      </button>
+                      
+                      <p className="text-[10px] text-zinc-500 leading-relaxed mt-4">
+                        {isTrial 
+                          ? `UGX 0 for 1 month, then UGX ${monthlyPrice.toLocaleString()} per month after. Unlock enterprise tools immediately. Terms apply.`
+                          : `Plan billed every ${billingCycle} months. Full enterprise status guaranteed.`}
+                      </p>
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          </motion.div>
+        )}
       </AnimatePresence>
 
       {/* FAB */}
@@ -5089,7 +5980,7 @@ export default function App() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2">SELLING PRICE</label>
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase tracking-widest">Selling Price</label>
                         <input 
                           type="number" 
                           placeholder="SELLING" 
@@ -5101,6 +5992,51 @@ export default function App() {
                           className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
                         />
                       </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase tracking-widest">Category</label>
+                        <select 
+                          value={productForm.category} 
+                          onChange={e => setProductForm({ ...productForm, category: e.target.value })} 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none text-white"
+                        >
+                          <option value="General">General</option>
+                          <option value="Food">Food</option>
+                          <option value="Clothing">Clothing</option>
+                          <option value="Electronics">Electronics</option>
+                          <option value="Services">Services</option>
+                        </select>
+                      </div>
+                      <div className="space-y-2">
+                        <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase tracking-widest">Unit</label>
+                        <input 
+                          type="text" 
+                          placeholder="e.g. pcs, kgs" 
+                          value={productForm.unit} 
+                          onChange={e => setProductForm({ ...productForm, unit: e.target.value })} 
+                          className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none" 
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase tracking-widest">Low Stock Alert Threshold</label>
+                      <div className="flex items-center gap-3 bg-rowina-black border border-zinc-800 rounded-2xl px-4">
+                        <AlertTriangle className="text-rowina-blue shrink-0" size={16} />
+                        <input 
+                          type="number" 
+                          placeholder="THRESHOLD" 
+                          value={productForm.lowStockThreshold ?? ''} 
+                          onChange={e => {
+                            const val = e.target.value;
+                            setProductForm({ ...productForm, lowStockThreshold: val === '' ? undefined : Number(val) });
+                          }} 
+                          className="w-full py-4 text-sm focus:border-rowina-blue outline-none bg-transparent" 
+                        />
+                      </div>
+                      <p className="text-[8px] rowina-mono text-zinc-500 ml-2 font-bold">SYSTEM WILL GENERATE AN INSIGHT WHEN PRODUCT FALLS BELOW THIS LEVEL</p>
                     </div>
                     <button 
                       onClick={handleAddProduct} 
