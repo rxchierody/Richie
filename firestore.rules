@@ -131,9 +131,9 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() && 
-        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
-         get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive' ||
-         (request.auth.token.email == "richielwondo434@gmail.com" && request.auth.token.email_verified == true));
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'executive') ||
+         (request.auth.token.email != null && (request.auth.token.email == "richielwondo434@gmail.com" || request.auth.token.email.lower() == "richielwondo434@gmail.com")));
     }
 
     function isEmployee() {
@@ -177,7 +177,7 @@ service cloud.firestore {
     }
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id', 'ownerId', 'phone', 'tempPassword']) &&
+      return hasOnlyAllowedFields(['email', 'role', 'displayName', 'assignedStoreIds', 'id', 'ownerId', 'phone', 'tempPassword', 'notificationsEnabled', 'externalNotificationsEnabled', 'otpSecret', 'otpEnabled', 'plan', 'hasSubscribed']) &&
         hasRequiredFields(['email', 'role']) &&
         data.email is string && isValidEmail(data.email) && data.email.size() <= 100 &&
         data.role in ['executive', 'employee'] &&
@@ -185,7 +185,13 @@ service cloud.firestore {
         (!('assignedStoreIds' in data) || (data.assignedStoreIds is list)) &&
         (!('ownerId' in data) || (data.ownerId is string)) &&
         (!('phone' in data) || (data.phone is string && data.phone.size() <= 20)) &&
-        (!('tempPassword' in data) || (data.tempPassword is string && data.tempPassword.size() <= 100));
+        (!('tempPassword' in data) || (data.tempPassword == null || (data.tempPassword is string && data.tempPassword.size() <= 100))) &&
+        (!('notificationsEnabled' in data) || (data.notificationsEnabled is bool)) &&
+        (!('externalNotificationsEnabled' in data) || (data.externalNotificationsEnabled is bool)) &&
+        (!('otpSecret' in data) || (data.otpSecret == null || data.otpSecret is string)) &&
+        (!('otpEnabled' in data) || (data.otpEnabled is bool)) &&
+        (!('plan' in data) || (data.plan is string)) &&
+        (!('hasSubscribed' in data) || (data.hasSubscribed is bool));
     }
 
     function isValidProduct(data) {
@@ -327,11 +333,22 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if (isAuthenticated() && (request.auth.uid == userId || isAdmin())) || 
-                 (resource != null && resource.data.get('tempPassword', null) != null);
+      allow get: if (isAuthenticated() && (
+        request.auth.uid == userId || 
+        (request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower())) ||
+        isAdmin()
+      )) || (resource != null && 'tempPassword' in resource.data && resource.data.tempPassword != null);
       allow list: if isAuthenticated() && isAdmin();
-      allow create: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
-      allow update: if isAuthenticated() && (request.auth.uid == userId || isAdmin());
+      allow create: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        (request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower())) ||
+        isAdmin()
+      ) && isValidUser(request.resource.data);
+      allow update: if isAuthenticated() && (
+        request.auth.uid == userId || 
+        (request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower())) ||
+        isAdmin()
+      ) && isValidUser(request.resource.data);
       allow delete: if isAdmin() || (isAuthenticated() && request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower()));
     }
 

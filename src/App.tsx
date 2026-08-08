@@ -349,7 +349,6 @@ export default function App() {
   const [paymentMethodFilter, setPaymentMethodFilter] = useState<PaymentMethod | 'ALL'>('ALL');
   const [userRole, setUserRole] = useState<UserRole>('employee');
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
-  const [executivePassword, setExecutivePassword] = useState<string>('admin123');
   const [currencyCode, setCurrencyCode] = useState(() => localStorage.getItem('rowina_currency') || 'USD');
   const f = (amount: number) => formatCurrency(amount, currencyCode);
 
@@ -371,8 +370,6 @@ export default function App() {
   // AI Insights State
   const [aiInsights, setAiInsights] = useState<{ id: string; text: string; type: 'stock' | 'sales' | 'general'; timestamp: string }[]>([]);
   const [isGeneratingAi, setIsGeneratingAi] = useState(false);
-  const [newExecPassword, setNewExecPassword] = useState('');
-  const [isUpdatingExecPassword, setIsUpdatingExecPassword] = useState(false);
 
   useEffect(() => {
     localStorage.setItem('rowina_lock_config', JSON.stringify(appLockConfig));
@@ -414,18 +411,6 @@ export default function App() {
     title: '',
     message: '',
     onConfirm: () => {}
-  });
-
-  const [authModal, setAuthModal] = useState<{
-    isOpen: boolean;
-    targetRole: UserRole | null;
-    password: string;
-    error: string;
-  }>({
-    isOpen: false,
-    targetRole: null,
-    password: '',
-    error: ''
   });
 
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -594,12 +579,18 @@ export default function App() {
           
           try {
             const userDoc = await getDoc(userDocRef);
+            const isOwnerAdmin = currentUser.email?.toLowerCase() === 'richielwondo434@gmail.com';
+            
             if (userDoc.exists()) {
               const data = userDoc.data() as UserProfile;
-              setUserProfile({ ...data, id: userDoc.id });
-              setUserRole(data.role);
+              const effectiveRole = isOwnerAdmin ? 'executive' : data.role;
+              setUserProfile({ ...data, role: effectiveRole, id: userDoc.id });
+              setUserRole(effectiveRole);
+              if (isOwnerAdmin && data.role !== 'executive') {
+                updateDoc(userDocRef, { role: 'executive' }).catch(err => console.error("Failed to update admin role:", err));
+              }
               // Direct employees to a useful non-restricted tab if they are on an executive-only tab
-              if (data.role === 'employee' && activeTab === 'portfolio') {
+              if (effectiveRole === 'employee' && activeTab === 'portfolio') {
                 setActiveTab('sales');
               }
             } else {
@@ -616,14 +607,14 @@ export default function App() {
                 console.warn("Email-based profile check failed (expected for new users):", e);
               }
 
-              let role: UserRole = 'executive'; // Default to executive for everyone to "own their own account"
+              let role: UserRole = isOwnerAdmin ? 'executive' : 'executive'; // Default to executive for account creators
               let displayName = currentUser.displayName || '';
               let assignedStoreIds: string[] = [];
               let ownerId: string | undefined = undefined;
               let tempPassword: string | undefined = undefined;
 
               if (emailDocData) {
-                role = emailDocData.role;
+                role = isOwnerAdmin ? 'executive' : emailDocData.role;
                 displayName = emailDocData.displayName || displayName;
                 assignedStoreIds = emailDocData.assignedStoreIds || [];
                 ownerId = emailDocData.ownerId;
@@ -781,15 +772,15 @@ export default function App() {
       );
     }, (err) => handleFirestoreError(err, OperationType.LIST, 'users'));
 
-    const unsubSettings = onSnapshot(doc(db, 'settings', 'global'), (snapshot) => {
+    const unsubProfile = onSnapshot(doc(db, 'users', user.uid), (snapshot) => {
       if (snapshot.exists()) {
-        setExecutivePassword(snapshot.data().executivePassword);
-      } else if (userRole === 'executive') {
-        // Initialize if not exists
-        setDoc(doc(db, 'settings', 'global'), { executivePassword: 'admin123' })
-          .catch(err => console.error("Failed to init settings:", err));
+        const data = snapshot.data() as UserProfile;
+        setUserProfile({ ...data, id: snapshot.id });
+        if (data.role) {
+          setUserRole(data.role);
+        }
       }
-    }, (err) => handleFirestoreError(err, OperationType.GET, 'settings/global'));
+    }, (err) => handleFirestoreError(err, OperationType.GET, `users/${user.uid}`));
 
     return () => {
       unsubStores();
@@ -804,7 +795,7 @@ export default function App() {
       unsubAlerts();
       unsubTriggered();
       unsubStaff();
-      unsubSettings();
+      unsubProfile();
     };
   }, [isAuthReady, user, selectedStoreId, userRole, userProfile]);
 
@@ -2349,20 +2340,27 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
           userCredential = await signInWithEmailAndPassword(auth, emailLower, password);
         } catch (error: any) {
           // Check if this is a staff bypass case
-          const staffDocPath = doc(db, 'users', emailLower);
-          const staffDoc = await getDoc(staffDocPath);
+          let staffDocExists = false;
+          let staffData: any = null;
+          try {
+            const staffDocPath = doc(db, 'users', emailLower);
+            const staffDoc = await getDoc(staffDocPath);
+            if (staffDoc.exists()) {
+              staffDocExists = true;
+              staffData = staffDoc.data();
+            }
+          } catch (e) {
+            console.warn("Staff bypass lookup skipped:", e);
+          }
           
-          if (staffDoc.exists() && staffDoc.data()?.tempPassword === password) {
+          if (staffDocExists && staffData?.tempPassword === password) {
             try {
               userCredential = await createUserWithEmailAndPassword(auth, emailLower, password);
-              if (staffDoc.data()?.displayName) {
-                await updateProfile(userCredential.user, { displayName: staffDoc.data().displayName });
+              if (staffData?.displayName) {
+                await updateProfile(userCredential.user, { displayName: staffData.displayName });
               }
             } catch (createErr: any) {
               if (createErr.code === 'auth/email-already-in-use') {
-                // Account exists but password was wrong. 
-                // We don't want to re-create, so we just throw if the bypass password doesn't match the one they typed
-                // (which we already checked, so this means the Auth password is different)
                 setLoginError("INVALID ACCOUNT DETAILS (Password mismatch)");
                 console.error("Auth exists but password mismatch with bypass data");
                 return;
@@ -2552,49 +2550,6 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
     setAppLockConfig({ type: null, value: null });
     setIsAppLocked(false);
     handleLogout();
-  };
-
-  const handleRoleSwitch = async (targetRole: UserRole) => {
-    if (userRole === targetRole) return;
-    
-    if (targetRole === 'executive') {
-      setAuthModal({
-        isOpen: true,
-        targetRole: 'executive',
-        password: '',
-        error: ''
-      });
-    } else {
-      try {
-        if (user) {
-          await updateDoc(doc(db, 'users', user.uid), { role: 'employee' });
-          setUserRole('employee');
-        }
-      } catch (error) {
-        console.error("Failed to switch role:", error);
-      }
-    }
-  };
-
-  const handleAuthSubmit = async () => {
-    if (isSubmitting) return;
-    
-    if (authModal.password === executivePassword) {
-      setIsSubmitting(true);
-      try {
-        if (user) {
-          await updateDoc(doc(db, 'users', user.uid), { role: 'executive' });
-          setUserRole('executive');
-          setAuthModal(prev => ({ ...prev, isOpen: false }));
-        }
-      } catch (error) {
-        setAuthModal(prev => ({ ...prev, error: 'FAILED TO UPDATE ROLE' }));
-      } finally {
-        setIsSubmitting(false);
-      }
-    } else {
-      setAuthModal(prev => ({ ...prev, error: 'INVALID PASSWORD' }));
-    }
   };
 
   const handleLogout = async () => {
@@ -2951,25 +2906,11 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                   <ChevronDown className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-600 pointer-events-none" size={10} />
                 </div>
               )}
-              <div className="flex bg-zinc-900 rounded-full p-1 border border-zinc-800">
-                <button 
-                  onClick={() => handleRoleSwitch('employee')}
-                  className={cn(
-                    "px-3 py-1 rounded-full text-[8px] rowina-mono transition-all",
-                    userRole === 'employee' ? "bg-zinc-700 text-white font-bold" : "text-zinc-500 hover:text-zinc-300"
-                  )}
-                >
-                  EMPLOYEE
-                </button>
-                <button 
-                  onClick={() => handleRoleSwitch('executive')}
-                  className={cn(
-                    "px-3 py-1 rounded-full text-[8px] rowina-mono transition-all",
-                    userRole === 'executive' ? "bg-rowina-blue text-black font-bold" : "text-zinc-500 hover:text-zinc-300"
-                  )}
-                >
-                  EXECUTIVE
-                </button>
+              <div className="px-3 py-1 bg-zinc-900 rounded-full border border-zinc-800 text-[8px] rowina-mono font-bold uppercase tracking-wider flex items-center gap-1.5">
+                <span className={cn("w-1.5 h-1.5 rounded-full", userRole === 'executive' ? "bg-rowina-blue" : "bg-zinc-500")} />
+                <span className={userRole === 'executive' ? "text-rowina-blue" : "text-zinc-400"}>
+                  {userRole.toUpperCase()}
+                </span>
               </div>
               <select 
                 value={currencyCode}
@@ -4775,70 +4716,6 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                 </button>
               </div>
             </div>
-
-            {userRole === 'executive' && (
-              <div className="bg-rowina-gray border border-zinc-800 p-8 rounded-[40px] space-y-8">
-                <div className="flex items-center gap-4 text-rowina-blue">
-                  <Key size={32} />
-                  <div>
-                    <h3 className="text-white font-bold">Executive Access Password</h3>
-                    <p className="text-zinc-500 text-xs">This password is required for employees to switch to executive mode.</p>
-                  </div>
-                </div>
-
-                <div className="space-y-6">
-                  <div className="space-y-2">
-                    <label className="text-[10px] rowina-mono text-zinc-500 ml-2 uppercase">
-                      SET NEW EXECUTIVE PASSWORD
-                    </label>
-                    <div className="flex gap-2">
-                      <input 
-                        type="password"
-                        placeholder="••••••••"
-                        value={newExecPassword}
-                        onChange={e => setNewExecPassword(e.target.value)}
-                        className="flex-1 bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-4 text-sm focus:border-rowina-blue outline-none transition-all"
-                      />
-                      <button 
-                        onClick={async () => {
-                          if (!newExecPassword || newExecPassword.length < 4) {
-                            setConfirmModal({
-                              isOpen: true,
-                              title: 'INVALID PASSWORD',
-                              message: 'Password must be at least 4 characters.',
-                              onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
-                            });
-                            return;
-                          }
-                          setIsUpdatingExecPassword(true);
-                          try {
-                            await setDoc(doc(db, 'settings', 'global'), { executivePassword: newExecPassword });
-                            setNewExecPassword('');
-                            setConfirmModal({
-                              isOpen: true,
-                              title: 'SUCCESS',
-                              message: 'Executive password updated successfully.',
-                              onConfirm: () => setConfirmModal(prev => ({ ...prev, isOpen: false }))
-                            });
-                          } catch (err) {
-                            handleFirestoreError(err, OperationType.WRITE, 'settings/global');
-                          } finally {
-                            setIsUpdatingExecPassword(false);
-                          }
-                        }}
-                        disabled={isUpdatingExecPassword}
-                        className="px-8 bg-rowina-blue text-black rounded-2xl font-bold rowina-mono text-[10px] tracking-widest hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-50"
-                      >
-                        {isUpdatingExecPassword ? 'UPDATING...' : 'UPDATE'}
-                      </button>
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-zinc-500 italic px-2">
-                    * Current password is required for any employee to gain executive privileges. Keep it safe.
-                  </p>
-                </div>
-              </div>
-            )}
           </motion.div>
         )}
 
@@ -6316,71 +6193,6 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
           </div>
         )}
       </AnimatePresence>
-      {/* Auth Modal for Role Transition */}
-      <AnimatePresence>
-        {authModal.isOpen && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6">
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              onClick={() => setAuthModal(prev => ({ ...prev, isOpen: false }))}
-              className="absolute inset-0 bg-black/80 backdrop-blur-sm"
-            />
-            <motion.div 
-              initial={{ scale: 0.9, opacity: 0, y: 30 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.9, opacity: 0, y: 30 }}
-              transition={{ type: "spring", damping: 25, stiffness: 400 }}
-              className="bg-rowina-gray w-full max-w-md rounded-[40px] border border-zinc-800 p-8 relative z-10 space-y-8"
-            >
-              <div className="space-y-2">
-                <p className="rowina-mono text-[10px] text-rowina-blue uppercase tracking-widest">AUTHENTICATION REQUIRED</p>
-                <h2 className="text-2xl font-bold text-white leading-tight">Enter Executive Password</h2>
-                <p className="text-zinc-500 text-xs">This area contains sensitive financial data and administrative controls.</p>
-              </div>
-              
-              <div className="space-y-4">
-                <div className="space-y-2">
-                  <label className="rowina-mono text-[10px] text-zinc-500 uppercase tracking-widest">PASSWORD</label>
-                  <input 
-                    type="password"
-                    value={authModal.password}
-                    onChange={(e) => setAuthModal(prev => ({ ...prev, password: e.target.value as any, error: '' }))}
-                    className="w-full bg-zinc-900 border border-zinc-800 rounded-2xl px-5 py-4 text-white focus:outline-none focus:border-rowina-blue transition-all"
-                    placeholder="••••••••"
-                    autoFocus
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleAuthSubmit();
-                    }}
-                  />
-                  {authModal.error && <p className="text-rose-500 text-[10px] rowina-mono uppercase">{authModal.error}</p>}
-                </div>
-              </div>
-
-              <div className="flex gap-4">
-                <button 
-                  onClick={() => setAuthModal(prev => ({ ...prev, isOpen: false }))}
-                  className="flex-1 bg-zinc-800 text-white py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest hover:bg-zinc-700 transition-all"
-                >
-                  CANCEL
-                </button>
-                <button 
-                  onClick={handleAuthSubmit}
-                  disabled={isSubmitting}
-                  className={cn(
-                    "flex-1 py-4 rounded-2xl font-bold rowina-mono text-xs tracking-widest transition-all",
-                    isSubmitting ? "bg-zinc-800 text-zinc-500 cursor-not-allowed" : "bg-rowina-blue text-black hover:bg-blue-600"
-                  )}
-                >
-                  {isSubmitting ? 'PROCESSING...' : 'VERIFY'}
-                </button>
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
-
       {/* Confirmation Modal */}
       <AnimatePresence>
         {confirmModal.isOpen && (
