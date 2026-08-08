@@ -2320,21 +2320,82 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
     e.preventDefault();
     if (isLoggingIn) return;
     
-    const email = emailForm.email.trim().toLowerCase();
+    const emailInput = emailForm.email.trim().toLowerCase();
+    const usernameInput = emailForm.username.trim();
+    const usernameLower = usernameInput.toLowerCase();
     const password = emailForm.password;
     
-    if (!email || (authMode === 'login' ? !password : !password || !emailForm.username)) {
-      setLoginError("ALL FIELDS REQUIRED");
-      return;
+    if (authMode === 'login') {
+      if (!emailInput && !usernameInput) {
+        setLoginError("PLEASE PROVIDE USERNAME OR EMAIL ADDRESS");
+        return;
+      }
+      if (!password) {
+        setLoginError("AUTHENTICATION PASS IS REQUIRED");
+        return;
+      }
+    } else {
+      if (!emailInput || !password || !usernameInput) {
+        setLoginError("ALL FIELDS REQUIRED FOR ACCOUNT CREATION");
+        return;
+      }
     }
 
     setIsLoggingIn(true);
     setLoginError(null);
 
-    const emailLower = email.trim().toLowerCase();
+    let targetEmail = emailInput;
 
     try {
       if (authMode === 'login') {
+        // Resolve email from username if emailInput is missing or not a valid email address
+        if (!targetEmail || !targetEmail.includes('@')) {
+          if (usernameLower.includes('@')) {
+            targetEmail = usernameLower;
+          } else if (usernameLower) {
+            let resolvedEmail: string | null = null;
+            
+            // 1. Check usernames collection doc
+            try {
+              const uDoc = await getDoc(doc(db, 'usernames', usernameLower));
+              if (uDoc.exists() && uDoc.data()?.email) {
+                resolvedEmail = uDoc.data().email;
+              }
+            } catch (err) {
+              console.warn("Username index lookup error:", err);
+            }
+            
+            // 2. Check users collection doc by ID = username
+            if (!resolvedEmail) {
+              try {
+                const userDoc = await getDoc(doc(db, 'users', usernameLower));
+                if (userDoc.exists() && userDoc.data()?.email) {
+                  resolvedEmail = userDoc.data().email;
+                }
+              } catch (err) {
+                console.warn("User doc lookup error:", err);
+              }
+            }
+
+            // 3. Known fallback mappings for executive/owner and common handles
+            if (!resolvedEmail) {
+              if (['richie', 'richie lwondo', 'richielwondo', 'richielwondo434'].includes(usernameLower)) {
+                resolvedEmail = 'richielwondo434@gmail.com';
+              }
+            }
+
+            if (resolvedEmail) {
+              targetEmail = resolvedEmail.toLowerCase();
+            } else {
+              setLoginError(`NO ACCREDITED PROFILE FOUND FOR USERNAME "${usernameInput}". PLEASE ENTER YOUR REGISTERED EMAIL OR CREATE AN ACCOUNT.`);
+              setIsLoggingIn(false);
+              return;
+            }
+          }
+        }
+
+        const emailLower = targetEmail;
+
         let userCredential;
         try {
           userCredential = await signInWithEmailAndPassword(auth, emailLower, password);
@@ -2361,7 +2422,7 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
               }
             } catch (createErr: any) {
               if (createErr.code === 'auth/email-already-in-use') {
-                setLoginError("INVALID ACCOUNT DETAILS (Password mismatch)");
+                setLoginError("ACCOUNT EXISTS BUT TEMPORARY PASSWORD DID NOT MATCH AUTH SYSTEM.");
                 console.error("Auth exists but password mismatch with bypass data");
                 return;
               }
@@ -2369,12 +2430,41 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
             }
           } else {
             // No bypass match and signIn failed
-            if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
-              setLoginError("INVALID ACCOUNT DETAILS");
+            console.error("Firebase Auth sign-in failed:", error.code, error.message);
+            if (error.code === 'auth/user-not-found') {
+              setLoginError(`ACCOUNT NOT FOUND FOR ${emailLower.toUpperCase()}. CLICK 'CREATE ACCOUNT' TAB TO SIGN UP.`);
+            } else if (error.code === 'auth/wrong-password') {
+              setLoginError("INCORRECT PASSWORD. PLEASE TRY AGAIN OR CLICK 'LOST CREDENTIALS?'.");
+            } else if (error.code === 'auth/invalid-credential') {
+              setLoginError(`INVALID CREDENTIALS FOR ${emailLower.toUpperCase()}. IF SIGNED UP WITH GOOGLE, USE GOOGLE ACCESS.`);
+            } else if (error.code === 'auth/invalid-email') {
+              setLoginError("INVALID EMAIL ADDRESS FORMAT.");
             } else {
-              setLoginError(error.message || "LOGIN FAILED");
+              setLoginError(error.message?.toUpperCase().replace('FIREBASE: ', '') || "LOGIN FAILED. PLEASE CHECK DETAILS.");
             }
             return;
+          }
+        }
+        
+        // Register/update username mapping in Firestore for future fast login
+        if (usernameInput) {
+          try {
+            await setDoc(doc(db, 'usernames', usernameLower), {
+              email: emailLower,
+              uid: userCredential?.user.uid,
+              displayName: usernameInput
+            }, { merge: true });
+          } catch (e) {
+            console.warn("Could not save username mapping:", e);
+          }
+        }
+        if (emailForm.username.trim() && userCredential?.user) {
+          try {
+            await updateProfile(userCredential.user, { displayName: emailForm.username.trim() });
+            const userRef = doc(db, 'users', userCredential.user.uid);
+            await updateDoc(userRef, { displayName: emailForm.username.trim() });
+          } catch (e) {
+            console.warn("Could not update display name on login:", e);
           }
         }
         
@@ -2387,8 +2477,19 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
           return; // Don't close auth screen yet, wait for OTP
         }
       } else {
-        const userCredential = await createUserWithEmailAndPassword(auth, email, password);
+        const userCredential = await createUserWithEmailAndPassword(auth, targetEmail, password);
         await updateProfile(userCredential.user, { displayName: emailForm.username });
+        if (usernameLower) {
+          try {
+            await setDoc(doc(db, 'usernames', usernameLower), {
+              email: targetEmail,
+              uid: userCredential.user.uid,
+              displayName: emailForm.username
+            }, { merge: true });
+          } catch (e) {
+            console.warn("Could not save username mapping on signup:", e);
+          }
+        }
       }
       setShowAuthScreen(false);
     } catch (error: any) {
@@ -2633,6 +2734,31 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                 </div>
               ) : (
                 <>
+                  {!isForgotPassword && (
+                    <div className="flex bg-rowina-black p-1 rounded-2xl border border-zinc-800/80 mb-6">
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('login'); setLoginError(null); }}
+                        className={cn(
+                          "flex-1 py-3 rounded-xl text-xs font-bold rowina-mono uppercase tracking-wider transition-all",
+                          authMode === 'login' ? "bg-rowina-blue text-black shadow-md" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        Login
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setAuthMode('signup'); setLoginError(null); }}
+                        className={cn(
+                          "flex-1 py-3 rounded-xl text-xs font-bold rowina-mono uppercase tracking-wider transition-all",
+                          authMode === 'signup' ? "bg-rowina-blue text-black shadow-md" : "text-zinc-500 hover:text-zinc-300"
+                        )}
+                      >
+                        Create Account
+                      </button>
+                    </div>
+                  )}
+
                   <div className="space-y-2 text-center text-balance">
                     <h2 className="text-2xl font-bold text-white uppercase tracking-tight">
                       {isForgotPassword ? 'Reset Access' : (authMode === 'login' ? 'Secure Login' : 'Create Account')}
@@ -2640,7 +2766,7 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                     <p className="text-zinc-500 text-sm">
                       {isForgotPassword 
                         ? "We'll send you a recovery link." 
-                        : (authMode === 'login' ? 'Welcome back. Provide credentials below.' : 'Staff? Use your registered email. Others create a new ID.')}
+                        : (authMode === 'login' ? 'Welcome back. Provide credentials below.' : 'Create your account to access Rowina Finance.')}
                     </p>
                   </div>
                   
@@ -2660,23 +2786,21 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                         />
                       ) : (
                         <>
-                          {authMode === 'signup' && (
-                            <input 
-                              type="text"
-                              placeholder="FULL NAME"
-                              value={emailForm.username}
-                              onChange={e => setEmailForm({...emailForm, username: e.target.value})}
-                              className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
-                              required
-                            />
-                          )}
                           <input 
-                            type="email"
-                            placeholder="EMAIL ADDRESS"
+                            type="text"
+                            placeholder={authMode === 'login' ? "USER NAME / ACCREDITED NAME" : "FULL NAME / USERNAME"}
+                            value={emailForm.username}
+                            onChange={e => setEmailForm({...emailForm, username: e.target.value})}
+                            className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
+                            required={authMode === 'signup'}
+                          />
+                          <input 
+                            type="text"
+                            placeholder={authMode === 'login' ? "EMAIL ADDRESS (OPTIONAL IF USERNAME ENTERED)" : "EMAIL ADDRESS"}
                             value={emailForm.email}
                             onChange={e => setEmailForm({...emailForm, email: e.target.value})}
                             className="w-full bg-rowina-black border border-zinc-800 rounded-2xl px-6 py-5 text-sm focus:border-rowina-blue outline-none transition-all shadow-inner"
-                            required
+                            required={authMode === 'signup'}
                           />
                           <div className="relative">
                             <input 
@@ -2767,7 +2891,7 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
                     onClick={() => { setAuthMode(authMode === 'login' ? 'signup' : 'login'); setLoginError(null); }}
                     className="text-[10px] rowina-mono text-zinc-500 hover:text-white transition-all uppercase tracking-widest text-center"
                   >
-                    {authMode === 'login' ? "Personnel Registry →" : "← Identification Login"}
+                    {authMode === 'login' ? "Need an account? Create Account →" : "← Already registered? Login"}
                   </button>
                   
                   <button 

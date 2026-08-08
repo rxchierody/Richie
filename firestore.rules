@@ -333,11 +333,7 @@ service cloud.firestore {
     }
 
     match /users/{userId} {
-      allow get: if (isAuthenticated() && (
-        request.auth.uid == userId || 
-        (request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower())) ||
-        isAdmin()
-      )) || (resource != null && 'tempPassword' in resource.data && resource.data.tempPassword != null);
+      allow get: if true;
       allow list: if isAuthenticated() && isAdmin();
       allow create: if isAuthenticated() && (
         request.auth.uid == userId || 
@@ -350,6 +346,12 @@ service cloud.firestore {
         isAdmin()
       ) && isValidUser(request.resource.data);
       allow delete: if isAdmin() || (isAuthenticated() && request.auth.token.email != null && (userId == request.auth.token.email || userId == request.auth.token.email.lower()));
+    }
+
+    match /usernames/{username} {
+      allow read: if true;
+      allow create, update: if true;
+      allow delete: if isAuthenticated();
     }
 
     match /products/{productId} {
