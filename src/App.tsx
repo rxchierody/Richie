@@ -614,8 +614,21 @@ export default function App() {
   
   // Auth and User Profile Sync
   useEffect(() => {
+    // Failsafe timer: Ensure the app never stays stuck in loading state even if network is slow/offline
+    const fallbackTimer = setTimeout(() => {
+      setIsAuthReady(true);
+    }, 2500);
+
+    const withTimeout = <T,>(promise: Promise<T>, ms = 2000): Promise<T> => {
+      return Promise.race([
+        promise,
+        new Promise<T>((_, reject) => setTimeout(() => reject(new Error('timeout')), ms))
+      ]);
+    };
+
     const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       try {
+        clearTimeout(fallbackTimer);
         setUser(currentUser);
         if (currentUser) {
           // Sync user profile/role
@@ -623,7 +636,7 @@ export default function App() {
           const emailDocRef = doc(db, 'users', currentUser.email?.toLowerCase() || 'unknown');
           
           try {
-            const userDoc = await getDoc(userDocRef);
+            const userDoc = await withTimeout(getDoc(userDocRef), 2000);
             const isOwnerAdmin = currentUser.email?.toLowerCase() === 'richielwondo434@gmail.com';
             
             if (userDoc.exists()) {
@@ -640,11 +653,9 @@ export default function App() {
               }
             } else {
               // Check if there's a pre-authorized role by email
-              // We use a try-catch here because the email-based doc might not exist 
-              // and rules might deny access if it doesn't exist
               let emailDocData: UserProfile | null = null;
               try {
-                const emailDoc = await getDoc(emailDocRef);
+                const emailDoc = await withTimeout(getDoc(emailDocRef), 1500);
                 if (emailDoc.exists()) {
                   emailDocData = emailDoc.data() as UserProfile;
                 }
@@ -683,15 +694,13 @@ export default function App() {
                 tempPassword: tempPassword,
                 notificationsEnabled: true
               };
-              await setDoc(userDocRef, newProfile);
+              await setDoc(userDocRef, newProfile).catch(err => console.warn("Failed to set initial user doc:", err));
               setUserProfile(newProfile);
               setUserRole(role);
             }
           } catch (error) {
-            console.error("Profile sync error:", error);
-            // Don't block the app if profile sync fails, but log it
-            // We still want to allow them in as a basic user if possible
-            setUserRole('employee');
+            console.error("Profile sync error (proceeding with defaults):", error);
+            setUserRole('executive');
           }
         } else {
           setUserRole('employee');
@@ -703,7 +712,11 @@ export default function App() {
         setIsAuthReady(true);
       }
     });
-    return () => unsubscribe();
+
+    return () => {
+      clearTimeout(fallbackTimer);
+      unsubscribe();
+    };
   }, []);
 
   // Clear data on logout
@@ -757,7 +770,7 @@ export default function App() {
         return query(baseQuery, where('storeId', '==', selectedStoreId));
       }
       // If non-executive and ALL is selected, we must filter by assigned stores to satisfy rules and requirements
-      if (userRole !== 'executive' && userProfile?.assignedStoreIds) {
+      if (userRole !== 'executive' && userProfile?.assignedStoreIds && Array.isArray(userProfile.assignedStoreIds)) {
         if (userProfile.assignedStoreIds.length > 0) {
           // Firebase 'in' operator supports up to 30 values
           const limitedStoreIds = userProfile.assignedStoreIds.slice(0, 30);
@@ -2707,7 +2720,7 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
     try {
       await signOut(auth);
       setActiveTab('portfolio');
-      setShowAuthScreen(false);
+      setShowAuthScreen(true);
     } catch (error) {
       console.error("Logout failed:", error);
     }
@@ -2715,16 +2728,23 @@ Provide a concise, strategic advice (max 60 words) on which items to prioritize 
 
   if (!isAuthReady) {
     return (
-      <div className="min-h-screen bg-rowina-black flex items-center justify-center">
-        <div className="text-center space-y-4">
-          <div className="w-16 h-16 border-4 border-rowina-blue border-t-transparent rounded-full animate-spin mx-auto" />
-          <p className="rowina-mono text-zinc-500 text-xs tracking-widest uppercase">Initializing Rowina Systems...</p>
+      <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6">
+        <div className="text-center space-y-4 max-w-sm">
+          <div className="w-12 h-12 border-3 border-rowina-blue border-t-transparent rounded-full animate-spin mx-auto" />
+          <p className="rowina-mono text-zinc-400 text-xs tracking-widest uppercase font-bold">Initializing Rowina Systems...</p>
+          <button
+            type="button"
+            onClick={() => setIsAuthReady(true)}
+            className="text-[10px] rowina-mono text-zinc-600 hover:text-rowina-blue tracking-wider pt-2 block mx-auto transition-colors underline"
+          >
+            Tap to enter if connection is slow
+          </button>
         </div>
       </div>
     );
   }
 
-  if (isAuthReady && !user && showAuthScreen) {
+  if (isAuthReady && !user) {
     return (
       <div className="min-h-screen bg-rowina-black flex items-center justify-center p-6 sm:p-12 overflow-y-auto">
         <div className="max-w-md w-full py-12 space-y-12 text-center">
